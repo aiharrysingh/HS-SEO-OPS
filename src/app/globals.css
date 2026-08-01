@@ -1,0 +1,174 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens.
+ *
+ * Colours are the validated data-viz reference palette. The two series hues
+ * (blue #2a78d6 / orange #eb6834, re-stepped for dark) pass the lightness band,
+ * chroma floor, CVD separation, normal-vision floor and 3:1 contrast checks
+ * against both surfaces. Don't substitute a hue here without re-validating —
+ * "looks different enough" is how these palettes go wrong.
+ *
+ * Dark values are declared twice on purpose: the media query follows the OS,
+ * the [data-theme] scope follows the in-app toggle, and the toggle must win
+ * in both directions.
+ */
+:root {
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-raised: #ffffff;
+
+  --ink: #0b0b0b;
+  --ink-secondary: #52514e;
+  --ink-muted: #898781;
+
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --border-strong: rgba(11, 11, 11, 0.16);
+
+  /* Series slots — clicks is slot 1, impressions slot 2. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  /* De-emphasis hue for sparklines, per the stat-tile contract. */
+  --series-1-quiet: #86b6ef;
+
+  /* Status. Reserved — never reused as a series colour. */
+  --good: #0ca30c;
+  --good-text: #006300;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+
+  --wash-1: rgba(42, 120, 214, 0.1);
+  --wash-2: rgba(235, 104, 52, 0.1);
+  --wash-good: rgba(12, 163, 12, 0.1);
+  --wash-warning: rgba(250, 178, 25, 0.14);
+  --wash-critical: rgba(208, 59, 59, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-raised: #232322;
+
+    --ink: #ffffff;
+    --ink-secondary: #c3c2b7;
+    --ink-muted: #898781;
+
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+    --border-strong: rgba(255, 255, 255, 0.16);
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-1-quiet: #1c5cab;
+
+    --good-text: #0ca30c;
+
+    --wash-1: rgba(57, 135, 229, 0.14);
+    --wash-2: rgba(217, 89, 38, 0.14);
+    --wash-good: rgba(12, 163, 12, 0.14);
+    --wash-warning: rgba(250, 178, 25, 0.16);
+    --wash-critical: rgba(208, 59, 59, 0.16);
+  }
+}
+
+:root[data-theme="dark"] {
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-raised: #232322;
+
+  --ink: #ffffff;
+  --ink-secondary: #c3c2b7;
+  --ink-muted: #898781;
+
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-1-quiet: #1c5cab;
+
+  --good-text: #0ca30c;
+
+  --wash-1: rgba(57, 135, 229, 0.14);
+  --wash-2: rgba(217, 89, 38, 0.14);
+  --wash-good: rgba(12, 163, 12, 0.14);
+  --wash-warning: rgba(250, 178, 25, 0.16);
+  --wash-critical: rgba(208, 59, 59, 0.16);
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-raised: var(--surface-raised);
+
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+
+  --color-grid: var(--grid);
+  --color-axis: var(--axis);
+  --color-hairline: var(--border);
+  --color-hairline-strong: var(--border-strong);
+
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-1-quiet: var(--series-1-quiet);
+
+  --color-good: var(--good);
+  --color-good-text: var(--good-text);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+
+  --color-wash-1: var(--wash-1);
+  --color-wash-2: var(--wash-2);
+  --color-wash-good: var(--wash-good);
+  --color-wash-warning: var(--wash-warning);
+  --color-wash-critical: var(--wash-critical);
+
+  --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Columns of numbers must align; standalone display figures must not. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: var(--wash-1);
+}
+
+:where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
