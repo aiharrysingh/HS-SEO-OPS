@@ -169,8 +169,39 @@ export async function buildReportInput(opts: {
   const missingWindows: string[] = [];
   if (currentQ.length === 0) missingWindows.push(`current (${formatWindow(window)})`);
   if (previousQ.length === 0) missingWindows.push(`previous (${formatWindow(prev)})`);
-  const hasYoy = yearAgoQ.length > 0;
-  if (!hasYoy) missingWindows.push(`year-ago (${formatWindow(yoy)})`);
+
+  /**
+   * Year-on-year is only offered when the window is genuinely covered.
+   *
+   * A site that didn't exist a year ago still returns a handful of rows from
+   * whichever page happened to be live, which sums to near-zero and renders as
+   * a catastrophic year-on-year decline. Reporting that would be a confident
+   * wrong number in front of a client — exactly what the standard warns
+   * against. Below the coverage bar we say the comparison isn't available.
+   */
+  const [yoyCoverage, currentCoverage] = await Promise.all([
+    windowCoverage(clientId, yoy),
+    windowCoverage(clientId, window),
+  ]);
+  const currentImpressions = currentQ.reduce((n, r) => n + r.impressions, 0);
+  const yoyImpressions = yearAgoQ.reduce((n, r) => n + r.impressions, 0);
+
+  const coveredEnough = currentCoverage > 0 && yoyCoverage / currentCoverage >= 0.8;
+  // Volume as well as coverage: a site three weeks old a year ago returns a
+  // full set of dates carrying almost no impressions, which passes a
+  // day-count check and still produces a meaningless -99%.
+  const measuredEnough =
+    currentImpressions > 0 && yoyImpressions / currentImpressions >= 0.2;
+  const hasYoy = yearAgoQ.length > 0 && coveredEnough && measuredEnough;
+
+  if (!hasYoy) {
+    let why = "";
+    if (yearAgoQ.length === 0) why = " — no data";
+    else if (!coveredEnough)
+      why = ` — only ${yoyCoverage} of ${currentCoverage} days have data`;
+    else why = " — the site had too little search visibility then to compare against";
+    missingWindows.push(`year-ago (${formatWindow(yoy)})${why}`);
+  }
 
   const pageMap = new Map(previousPages.map((p) => [p.url, p]));
   const pages: PageMovement[] = currentPages.map((p) => {
@@ -296,6 +327,24 @@ function segment(
     branded: totalsFrom(branded),
     nonBranded: totalsFrom(nonBranded),
   };
+}
+
+/** Distinct days in the window that actually have query data. */
+async function windowCoverage(clientId: string, w: DateWindow): Promise<number> {
+  const db = await getDb();
+  const [row] = await db
+    .select({
+      days: sql<number>`count(distinct ${schema.queryMetrics.date})::int`,
+    })
+    .from(schema.queryMetrics)
+    .where(
+      and(
+        eq(schema.queryMetrics.clientId, clientId),
+        gte(schema.queryMetrics.date, w.start),
+        lte(schema.queryMetrics.date, w.end),
+      ),
+    );
+  return Number(row?.days ?? 0);
 }
 
 async function queryRows(clientId: string, w: DateWindow) {

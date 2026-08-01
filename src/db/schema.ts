@@ -222,6 +222,22 @@ export const users = pgTable("users", {
   clientId: uuid("client_id").references(() => clients.id, {
     onDelete: "cascade",
   }),
+  /**
+   * Google identity, filled in on first sign-in. `null` for a user row created
+   * any other way (there isn't one yet — seed data has no users).
+   */
+  googleSub: text("google_sub").unique(),
+  name: text("name"),
+  picture: text("picture"),
+  /**
+   * OAuth tokens for calling Google APIs (Search Console `sites.list`) as this
+   * person, distinct from the service account `gsc.ts` uses for the nightly
+   * pull. Same trust boundary as the service account key already in `.env`.
+   */
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

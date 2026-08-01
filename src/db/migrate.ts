@@ -2,7 +2,7 @@
  * Applies the generated SQL in ./drizzle to whichever database is configured.
  * Run with `npm run db:migrate`.
  */
-import "dotenv/config";
+import "./env";
 import * as schema from "./schema";
 
 const MIGRATIONS_FOLDER = "./drizzle";

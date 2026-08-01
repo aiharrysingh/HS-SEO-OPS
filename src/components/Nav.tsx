@@ -12,6 +12,11 @@ export function ClientNav({ clients }: { clients: NavClient[] }) {
   return (
     <nav className="flex flex-col gap-0.5" aria-label="Clients">
       <NavItem href="/" label="Portfolio" active={pathname === "/"} />
+      <NavItem
+        href="/account"
+        label="Account"
+        active={pathname.startsWith("/account")}
+      />
 
       <div className="mt-5 px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
         Clients
@@ -64,6 +69,44 @@ function NavItem({
         </span>
       )}
     </Link>
+  );
+}
+
+export type NavUser = { email: string; name: string | null; picture: string | null };
+
+/** Signed-in identity plus sign-out. `compact` drops the label for the mobile strip. */
+export function UserMenu({ user, compact = false }: { user: NavUser; compact?: boolean }) {
+  return (
+    <div className="flex items-center gap-2 px-1">
+      {user.picture ? (
+        // eslint-disable-next-line @next/next/no-img-element -- external Google avatar, not worth next/image's remote-pattern config for one small icon
+        <img
+          src={user.picture}
+          alt=""
+          width={24}
+          height={24}
+          className="h-6 w-6 shrink-0 rounded-full"
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-wash-1 text-[11px] font-medium text-ink-secondary">
+          {(user.name ?? user.email)[0]?.toUpperCase()}
+        </span>
+      )}
+      {!compact && (
+        <span className="min-w-0 flex-1 truncate text-xs text-ink-secondary">
+          {user.name ?? user.email}
+        </span>
+      )}
+      <form action="/api/auth/logout" method="POST">
+        <button
+          type="submit"
+          className="rounded-lg border border-hairline px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-page hover:text-ink"
+        >
+          Sign out
+        </button>
+      </form>
+    </div>
   );
 }
 

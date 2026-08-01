@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authGuard } from "@/lib/auth";
 import { GscConfigError, isGscConfigured, syncClient } from "@/lib/gsc";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +9,9 @@ export async function POST(
   _req: Request,
   { params }: { params: Promise<{ clientId: string }> },
 ) {
+  const blocked = await authGuard();
+  if (blocked) return blocked;
+
   const { clientId } = await params;
 
   if (!isGscConfigured()) {

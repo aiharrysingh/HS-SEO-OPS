@@ -115,17 +115,39 @@ Pros: one source of truth. Improve `client-report` and both the app and the team
 improve together.
 Cons: less control over exact output shape, more moving parts, harder to unit test.
 
-### Recommendation: A, with the skills as source material
-Call the API directly, but generate prompts *from the skill files* rather than
-rewriting the logic by hand. Keep `shared/references/current-state.md` as a file
-the app loads at runtime, exactly as the skills do.
+### Option C — No LLM in the app at all
+Reports are produced by a deterministic rule engine reading the same data.
 
-This gives control and testability, while keeping one place to update SEO facts.
-When FAQ rich results die or a Core Web Vitals threshold changes, one file changes.
+Pros: same data always yields the same report. No per-report cost, no latency,
+no model drift, no client data leaving the building. Every sentence traces to a
+rule and a number, so a disputed claim can be answered rather than argued about.
+Cons: the prose is plainer, and the engine can only diagnose what it has been
+taught. A genuinely novel cause comes out as "unexplained".
 
-**Non-negotiable:** the app must not hard-code volatile SEO facts into prompts.
-That file is loaded at runtime and dated. If it goes stale the app says so in its
-output.
+### Decision: C — deterministic, with the skills as the specification
+
+**Superseded the original recommendation of A.** No LLM is used anywhere in this
+tool.
+
+This works because the `client-report` standard's own diagnosis list is almost
+entirely data-detectable: the AI Overview signature, algorithm-update date
+correlation, branded vs non-branded divergence, seasonality, ranking loss versus
+CTR compression, and whether a movement is one page or the whole site. Those are
+comparisons, not judgements. And where nothing fits, the standard already tells
+us what to do — *"If you can't explain a movement, say you can't and state what
+you'd need to check"* — which a rule engine does honestly and a language model
+is precisely the thing that would paper over.
+
+The skills stop being prompt source material and become the **specification**:
+the rules implement what `client-report` says to look for, in the order it says
+to look. A human still edits the draft; the target was an hour down to under
+fifteen minutes, not zero.
+
+**Non-negotiable, unchanged:** the app must not hard-code volatile SEO facts.
+`current-state.md` is loaded at runtime and dated, and if it goes stale the app
+says so in its output. Without an LLM this matters *more*, not less — the
+confirmed-update timeline in that file is read directly to date-match traffic
+movements, exactly as the standard demands.
 
 ---
 

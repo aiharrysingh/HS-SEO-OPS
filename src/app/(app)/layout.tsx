@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { asc } from "drizzle-orm";
 import { getDb, schema, usingEmbeddedPostgres } from "@/db";
-import { ClientNav, ThemeToggle } from "@/components/Nav";
+import { getCurrentUser } from "@/lib/auth";
+import { ClientNav, ThemeToggle, UserMenu } from "@/components/Nav";
 
 // Every screen reads live data; nothing here is worth prerendering.
 export const dynamic = "force-dynamic";
@@ -11,6 +13,12 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Proxy already redirects an unauthenticated request here, but Next 16
+  // is explicit that Proxy isn't a full auth solution — this is the real
+  // check, run server-side against the database.
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+
   const db = await getDb();
   const clients = await db
     .select({
@@ -43,6 +51,7 @@ export default async function AppLayout({
               hosted database.
             </p>
           )}
+          <UserMenu user={user} />
           <ThemeToggle />
         </div>
       </aside>
@@ -54,7 +63,10 @@ export default async function AppLayout({
             <Link href="/" className="text-sm font-semibold text-ink">
               HS SEO Ops
             </Link>
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <UserMenu user={user} compact />
+              <ThemeToggle />
+            </div>
           </div>
           <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
             {clients.map((c) => (

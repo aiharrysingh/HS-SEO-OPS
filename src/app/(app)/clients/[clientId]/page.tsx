@@ -77,6 +77,12 @@ export default async function ClientPage({
 
         <div className="flex items-center gap-2">
           <WindowSwitcher clientId={clientId} active={days} />
+          <Link
+            href={`/clients/${clientId}/reports`}
+            className="rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-page"
+          >
+            Reports
+          </Link>
           <SyncButton clientId={clientId} />
         </div>
       </header>

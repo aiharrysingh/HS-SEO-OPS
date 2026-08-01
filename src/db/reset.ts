@@ -2,7 +2,7 @@
  * Drops every table and the migration bookkeeping, so `npm run db:migrate`
  * starts from nothing. Local convenience only.
  */
-import "dotenv/config";
+import "./env";
 
 async function main() {
   const url = process.env.DATABASE_URL;

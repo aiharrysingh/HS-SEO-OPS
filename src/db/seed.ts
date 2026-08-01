@@ -9,10 +9,12 @@
  *
  * Run with `npm run db:seed`. Safe to re-run — it clears the tables first.
  */
-import "dotenv/config";
+import "./env";
 import { getDb, schema } from "./index";
 import { addDays, dataCutoff, toIsoDate } from "../lib/dates";
 import { deriveBrandTerms } from "../lib/brand";
+import { referencesConfigured } from "../lib/references";
+import { generateReportForClient } from "../lib/reports";
 
 /** Deterministic PRNG so re-seeding gives the same demo every time. */
 function rng(seed: number) {
@@ -158,11 +160,23 @@ const CLIENTS = [
   },
 ] as const;
 
-/** Metrics history depth. A year lets Month 6 milestones actually fill in. */
-const HISTORY_DAYS = 400;
+/**
+ * Metrics history depth. Needs to exceed a year plus the longest window, or
+ * year-on-year has nothing to compare against and every report says so.
+ */
+const HISTORY_DAYS = 560;
 
-/** Days over which the seeded AI Overview click compression ramps in. */
-const AI_PRESSURE_DAYS = 70;
+/**
+ * When the seeded AI Overview click compression arrives.
+ *
+ * Modelled as a rollout, not a slow drift: nothing before day 21, ramping to
+ * full by day 7, steady after. That shape matters — a gradual months-long ramp
+ * looks almost identical in a window and its predecessor, so period-on-period
+ * detection finds nothing and the detector is never actually exercised. A real
+ * AI Overview appears on a query cluster over days.
+ */
+const AI_PRESSURE_ONSET_DAYS = 14;
+const AI_PRESSURE_FULL_DAYS = 8;
 
 type ClientSpec = (typeof CLIENTS)[number];
 
@@ -238,11 +252,14 @@ function buildQueryMetrics(
         new Date(`${date}T00:00:00Z`).getTime()) /
         86_400_000,
     );
-    // Ramps 0 → 1 over the most recent AI_PRESSURE_DAYS.
     const pressure =
-      daysBack >= AI_PRESSURE_DAYS
+      daysBack >= AI_PRESSURE_ONSET_DAYS
         ? 0
-        : 1 - daysBack / AI_PRESSURE_DAYS;
+        : Math.min(
+            1,
+            (AI_PRESSURE_ONSET_DAYS - daysBack) /
+              (AI_PRESSURE_ONSET_DAYS - AI_PRESSURE_FULL_DAYS),
+          );
 
     const emit = (
       terms: string[],
@@ -255,7 +272,7 @@ function buildQueryMetrics(
         const w = (weights[i] / wSum) * share;
         const jitter = 0.85 + rand() * 0.3;
 
-        let impressions = Math.round(totals.impressions * w * jitter);
+        const impressions = Math.round(totals.impressions * w * jitter);
         let clicks = Math.round(totals.clicks * w * jitter);
 
         if (!branded && isPressured(term) && pressure > 0) {
@@ -412,8 +429,44 @@ async function main() {
     { email: "seo@agency.test", role: "seo" },
   ]);
 
+  await seedReports(db);
+
   console.log(`\nSeeded. Data cutoff is ${cutoff} (today ${toIsoDate(new Date())}).`);
   process.exit(0);
+}
+
+/**
+ * Real reports for every client, produced by the same rule engine the app uses.
+ *
+ * Possible because generation is deterministic and needs no API key — the seed
+ * runs the production path rather than faking its output, so what a developer
+ * sees locally is exactly what the tool produces.
+ */
+async function seedReports(db: Awaited<ReturnType<typeof getDb>>) {
+  if (!referencesConfigured()) {
+    console.log(
+      "  Skipped reports — SEO_REFERENCES_DIR is not set, and the app will not " +
+        "generate from SEO facts that carry no date.",
+    );
+    return;
+  }
+
+  const clients = await db.select().from(schema.clients);
+  let made = 0;
+  for (const c of clients) {
+    for (const cadence of ["weekly", "monthly"] as const) {
+      try {
+        await generateReportForClient({ clientId: c.id, cadence });
+        made++;
+      } catch (err) {
+        console.log(
+          `  Could not generate the ${cadence} report for ${c.name}: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+    }
+  }
+  console.log(`  Generated ${made} reports.`);
 }
 
 main().catch((err) => {

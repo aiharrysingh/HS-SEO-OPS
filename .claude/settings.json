@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f src/lib/anthropic.ts src/lib/reportPrompt.ts _check2.ts _check3.ts _check4.ts _shots2.mjs _shots3.mjs)",
+      "Bash(npm uninstall *)",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./package.json'\\).dependencies\\).join\\(', '\\)\\)\")"
+    ]
+  }
+}
