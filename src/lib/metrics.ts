@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { PageStatus, PageType } from "@/db/schema";
 import {
@@ -106,7 +106,15 @@ export async function getClientPerformance(
   const pages = await db
     .select()
     .from(schema.pages)
-    .where(eq(schema.pages.clientId, clientId))
+    // Drafts are the content calendar, not published pages. They have no
+    // metrics by definition, so including them would pad the tracker with
+    // zero rows and drag every average down.
+    .where(
+      and(
+        eq(schema.pages.clientId, clientId),
+        ne(schema.pages.status, "draft"),
+      ),
+    )
     .orderBy(desc(schema.pages.publishedAt));
 
   if (pages.length === 0) {

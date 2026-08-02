@@ -26,6 +26,7 @@ import { TimeSeriesChart } from "@/components/TimeSeriesChart";
 import { PagesTable } from "@/components/PagesTable";
 import { SyncButton } from "@/components/SyncButton";
 import { ImportPagesButton } from "@/components/ImportPagesButton";
+import { DetectDatesButton } from "@/components/DetectDatesButton";
 import {
   Card,
   CardHeader,
@@ -74,6 +75,11 @@ export default async function ClientPage({
     getClientPerformance(clientId, window),
     getCountryBreakdown(clientId, window),
   ]);
+
+  // Milestones measure from go-live, so an undated page shows nothing in any
+  // milestone column. Surfacing the count makes that visible rather than
+  // leaving four permanently empty columns to be read as "no traffic".
+  const undatedCount = perf.pages.filter((p) => !p.publishedAt).length;
   const initiallySyncing = isSyncActive(client.syncStartedAt);
 
   /**
@@ -143,6 +149,12 @@ export default async function ClientPage({
             label={countriesLabel(countries)}
           />
           <Link
+            href={withFilters(`/clients/${clientId}/content`, window)}
+            className="rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-page"
+          >
+            Content
+          </Link>
+          <Link
             href={withFilters(`/clients/${clientId}/analytics`, window, {
               country: sp.country,
             })}
@@ -159,6 +171,7 @@ export default async function ClientPage({
             Reports
           </Link>
           <ImportPagesButton clientId={clientId} />
+          <DetectDatesButton clientId={clientId} undatedCount={undatedCount} />
           <SyncButton
             clientId={clientId}
             initiallySyncing={initiallySyncing}

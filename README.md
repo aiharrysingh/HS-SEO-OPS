@@ -3,13 +3,16 @@
 SEO operations tool with a white-label client view. See
 [docs/hs-seo-ops-plan.md](docs/hs-seo-ops-plan.md) for the plan this is built against.
 
-**Phases 1 and 2 are built.**
+**Phases 1–3 are built.**
 
 - **Phase 1 — Content Performance Tracker.** Every blog and landing page across
   all clients, with clicks and impressions from Search Console, and performance
   measured from go-live at week 1, month 1, month 3 and month 6.
 - **Phase 2 — Weekly & monthly reports.** Drafted from the data by a
   deterministic rule engine, reviewed and approved by a human, exported branded.
+- **Phase 3 — Content calendar & keyword suggestions.** Search terms ranking at
+  positions 5–20 with real impressions, split into *write this* and *improve
+  this*, each plannable onto a calendar in one click.
 
 **No LLM is used anywhere in this tool.** Reports are computed, not written —
 see [plan §4](docs/hs-seo-ops-plan.md) for the decision and what it trades away.
@@ -265,12 +268,68 @@ src/
   between them.
 - `npm run typecheck` and `npm run lint` both pass clean.
 
+## Publish dates and milestones
+
+Milestones (week 1, month 1/3/6) measure from go-live, so a page with no
+`published_at` shows nothing in any milestone column. Search Console has no
+concept of a publish date, so imported pages start with none.
+
+**Detect dates** on a client screen reads each page's own structured metadata —
+`article:published_time`, schema.org `datePublished`, or a `<time
+itemprop="datePublished">`. Only dates a page *states about itself* are
+accepted. Sitemap `lastmod`, URL date patterns and first-seen-in-GSC are all
+deliberately unused: each is a guess, and a wrong publish date doesn't fail
+loudly, it silently produces a wrong "month 3" number that reads as real.
+Whatever can't be detected — typically landing pages, which genuinely have no
+publish date — is left blank and set by hand on the page screen.
+
+It fetches the client's own site, so it goes at 4 concurrent requests with a
+pause between batches, and **stops early if the site starts refusing
+requests** rather than pushing a server that is already saying no.
+
+**Two things bound how much milestone data you actually get**, both worth
+knowing before reading an empty column as "no traffic":
+
+1. A page must state its date. Blog posts almost always do; landing pages
+   almost never do.
+2. Metrics must exist for the page's first weeks. `INITIAL_BACKFILL_DAYS` is
+   90, so only pages published inside that window have complete milestones.
+   Raise it and re-sync to light up more history — the trade is a slower first
+   sync.
+
+## Content plan (Phase 3)
+
+`/clients/[id]/content` answers "what should we write next" from evidence
+rather than instinct. Terms are pulled from `query_metrics` at positions 5–20
+with at least 30 impressions — Google already shows the site for these, so
+they are the cheapest ground to gain — and split in two:
+
+- **Write** — real demand that nothing on the site targets.
+- **Improve** — a page already exists; it just isn't good enough yet.
+
+Branded terms are excluded: a site ranks first for its own name, and leaving
+those in buries the terms the work can actually move.
+
+**"Existing page" is a text match, not Search Console attribution.** Query data
+is stored at site level (page × query would breach GSC's 50k pairs/day
+ceiling), so the app cannot know which page ranks for a term — only which page
+looks written for it. Matching handles plurals and run-together spellings, and
+the UI says what it is.
+
+Planned pieces are `pages` rows with `status = "draft"` and `published_at`
+holding the intended date — no new table (plan §5). **Mark live** flips the
+status, and the same date becomes the go-live date the milestone columns
+already measure from. Drafts are excluded from the tracker so they don't pad it
+with zero rows.
+
+Competitor gaps (the third input the plan names) need Ahrefs or Semrush and
+are not built; the screen works on GSC alone and doesn't pretend otherwise.
+
 ## Not built yet
 
-Phases 3–5 from the plan: content calendar and keyword suggestions, landing page
-audits, content review. `query_metrics` already holds what Phase 3 needs for
-opportunity terms, and `audits` and `client_state` are in the schema, so none of
-them need a migration to start.
+Phases 4–5 from the plan: landing page audits and content review. `audits` and
+`client_state` are already in the schema, so neither needs a migration to
+start.
 
 **Client-side auth is not built** — only the team's Google sign-in is. The
 plan calls for a separate magic-link flow for clients viewing their own

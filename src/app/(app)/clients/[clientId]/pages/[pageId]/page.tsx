@@ -15,6 +15,7 @@ import { compact, full, percent, position } from "@/lib/format";
 import { DataCutoff } from "@/components/DataCutoff";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { TimeSeriesChart } from "@/components/TimeSeriesChart";
+import { PageMetaForm } from "@/components/PageMetaForm";
 import { Badge, Card, CardHeader, StatTile } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -92,6 +93,22 @@ export default async function PageDetail({
 
         <DataCutoff cutoff={detail.cutoff} className="mt-2" />
       </header>
+
+      <Card>
+        <CardHeader
+          title="Page details"
+          subtitle="Search Console supplies the traffic; the publish date and target keyword are curated here."
+        />
+        <div className="px-4 py-3">
+          <PageMetaForm
+            pageId={page.id}
+            publishedAt={page.publishedAt}
+            targetKeyword={page.targetKeyword}
+            type={page.type}
+            cutoff={detail.cutoff}
+          />
+        </div>
+      </Card>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
