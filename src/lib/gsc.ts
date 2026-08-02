@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { addDays, dataCutoff } from "./dates";
+import { clientFromStoredTokens } from "./googleOAuth";
 
 /**
  * Google Search Console ingest.
@@ -9,6 +10,15 @@ import { addDays, dataCutoff } from "./dates";
  * 50k page-keyword pairs per property per day (plan §6). We request the `page`
  * and `date` dimensions only — not `query` — which keeps each client to a few
  * hundred rows a day.
+ *
+ * Two ways to authenticate a pull, tried in this order per client:
+ *  1. `clients.gscAuthUserId` — a team member's own Google OAuth grant (from
+ *     signing in and linking a property on /account). No extra setup: if they
+ *     can see the property on /account, this can sync it.
+ *  2. The shared service account (`GOOGLE_SERVICE_ACCOUNT_EMAIL` /
+ *     `GOOGLE_PRIVATE_KEY`) — requires manually adding that service account as
+ *     a user on the property in Search Console, but doesn't depend on any one
+ *     person's login surviving.
  */
 
 const SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
@@ -46,35 +56,64 @@ export type SyncResult = {
 
 export class GscConfigError extends Error {}
 
-function credentials() {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  // Private keys carry literal \n when they come from an env var.
-  const key = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-
-  if (!email || !key) {
-    throw new GscConfigError(
-      "Search Console is not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL and " +
-        "GOOGLE_PRIVATE_KEY, and grant that service account access to the property.",
-    );
-  }
-  return { email, key };
-}
-
+/** Whether the shared service-account fallback is set up — not the whole story any more, see `resolveAuth`. */
 export function isGscConfigured(): boolean {
   return Boolean(
     process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY,
   );
 }
 
-async function searchConsole() {
-  const { google } = await import("googleapis");
-  const { email, key } = credentials();
-  const auth = new google.auth.JWT({
-    email,
-    key,
-    scopes: [SCOPE],
-  });
-  return google.searchconsole({ version: "v1", auth });
+/**
+ * Picks the credential to sync one client with — that client's linked Google
+ * account if it has one and still holds a refresh token, else the shared
+ * service account. Throws `GscConfigError` (with next steps for either path)
+ * only when neither is available.
+ */
+async function resolveAuth(client: { gscAuthUserId: string | null }) {
+  if (client.gscAuthUserId) {
+    const db = await getDb();
+    const [user] = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, client.gscAuthUserId))
+      .limit(1);
+
+    if (user?.refreshToken) {
+      const userId = user.id;
+      const auth = await clientFromStoredTokens({
+        accessToken: user.accessToken,
+        refreshToken: user.refreshToken,
+        expiresAt: user.tokenExpiresAt,
+      });
+      // Same reasoning as gscAccounts.ts: persist whatever the client
+      // refreshes to, or the stored copy goes stale sync after sync.
+      auth.on("tokens", (t) => {
+        const update: Partial<typeof schema.users.$inferInsert> = {};
+        if (t.access_token) update.accessToken = t.access_token;
+        if (t.refresh_token) update.refreshToken = t.refresh_token;
+        if (t.expiry_date) update.tokenExpiresAt = new Date(t.expiry_date);
+        if (Object.keys(update).length > 0) {
+          void db.update(schema.users).set(update).where(eq(schema.users.id, userId));
+        }
+      });
+      return auth;
+    }
+  }
+
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  // Private keys carry literal \n when they come from an env var.
+  const key = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  if (email && key) {
+    const { google } = await import("googleapis");
+    return new google.auth.JWT({ email, key, scopes: [SCOPE] });
+  }
+
+  throw new GscConfigError(
+    "No way to reach Search Console for this client. Either sign in on " +
+      "/account with a Google account that has access to the property and " +
+      "link it there, or set GOOGLE_SERVICE_ACCOUNT_EMAIL and " +
+      "GOOGLE_PRIVATE_KEY and grant that service account read access to it.",
+  );
 }
 
 type GscRow = {
@@ -96,12 +135,14 @@ type GscRow = {
  * what the API docs recommend anyway.
  */
 async function fetchRows(
+  auth: Awaited<ReturnType<typeof resolveAuth>>,
   property: string,
   dimensions: string[],
   start: string,
   end: string,
 ): Promise<GscRow[]> {
-  const api = await searchConsole();
+  const { google } = await import("googleapis");
+  const api = google.searchconsole({ version: "v1", auth });
   const out: GscRow[] = [];
   const ROW_LIMIT = 25_000;
 
@@ -161,6 +202,8 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
     );
   }
 
+  const auth = await resolveAuth(client);
+
   const trackedPages = await db
     .select({ id: schema.pages.id, url: schema.pages.url })
     .from(schema.pages)
@@ -173,6 +216,7 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
 
   try {
     const rows = await fetchRows(
+      auth,
       client.gscProperty,
       ["page", "date"],
       start,
@@ -218,6 +262,7 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
     }
 
     const queryRowsStored = await syncQueries(
+      auth,
       clientId,
       client.gscProperty,
       start,
@@ -259,6 +304,7 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
  * sharing a start date would leave that gap permanently unfilled.
  */
 async function syncQueries(
+  auth: Awaited<ReturnType<typeof resolveAuth>>,
   clientId: string,
   property: string,
   pageStart: string,
@@ -282,7 +328,7 @@ async function syncQueries(
   // Never reach further back than the page sync already decided to.
   if (start < pageStart && !latest) start = pageStart;
 
-  const rows = await fetchRows(property, ["date", "query"], start, end);
+  const rows = await fetchRows(auth, property, ["date", "query"], start, end);
 
   const values: (typeof schema.queryMetrics.$inferInsert)[] = [];
   for (const row of rows) {

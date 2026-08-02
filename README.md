@@ -82,13 +82,26 @@ link), so it's unchanged rather than silently locked.
 
 ## Search Console
 
-Copy `.env.example` to `.env.local` and fill in the Google values:
+Two ways to authorise a client's sync — pick whichever fits, per client:
+
+**A team member's Google sign-in (no setup)** — on `/account`, every property
+that signed-in Google account can see is listed. Linking one to a client (or
+creating a client straight from it) records whose sign-in that was; syncing
+then uses that person's own OAuth grant. If they can already see the property
+on `/account`, it can sync immediately — nothing to configure.
+
+**A shared service account (works without depending on one person's login)**
+— copy `.env.example` to `.env.local` and fill in the Google values:
 
 1. Create a service account and enable the Search Console API.
 2. In Search Console, add the service account's email as a user on each
    property (read access is enough).
 3. Set `gsc_property` on each client row — `sc-domain:example.com` for a domain
    property, or the full URL for a URL-prefix one.
+
+`syncClient` tries a client's linked Google account first, then falls back to
+the service account (see `resolveAuth` in `src/lib/gsc.ts`). A client needs
+only one of the two.
 
 Then **Sync now** on a client screen, or schedule the nightly pull:
 
@@ -101,8 +114,8 @@ It refuses to run without `CRON_SECRET` set — otherwise anyone could burn the
 day's quota. Returns `207` if any client failed, so a partial failure doesn't
 read as success.
 
-Without credentials the app runs normally on stored data; sync reports that it
-isn't configured rather than failing quietly.
+A client with neither a linked Google account nor the service account
+configured gets a clear per-client error instead of syncing failing quietly.
 
 ### What sync does
 

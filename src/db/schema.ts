@@ -6,6 +6,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   date,
   index,
   integer,
@@ -42,6 +43,17 @@ export const clients = pgTable("clients", {
   domain: text("domain").notNull(),
   /** e.g. "sc-domain:example.com" or "https://example.com/" */
   gscProperty: text("gsc_property"),
+  /**
+   * Whose Google sign-in has read access to `gscProperty`, so syncing can use
+   * that person's own OAuth grant instead of requiring a service account to
+   * be separately added as a user on every property in Search Console. Set
+   * when a team member links or creates a client from a property they can
+   * see on /account. `null` clears back to the service-account fallback.
+   */
+  gscAuthUserId: uuid("gsc_auth_user_id").references(
+    (): AnyPgColumn => users.id,
+    { onDelete: "set null" },
+  ),
   ga4PropertyId: text("ga4_property_id"),
   branding: jsonb("branding").$type<Branding>().notNull().default({}),
   /**

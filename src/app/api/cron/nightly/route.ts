@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isGscConfigured, syncAllClients } from "@/lib/gsc";
+import { syncAllClients } from "@/lib/gsc";
 
 export const dynamic = "force-dynamic";
 // GSC pulls are slow-ish; give the whole portfolio room to finish.
@@ -26,13 +26,6 @@ export async function GET(req: Request) {
   const auth = req.headers.get("authorization");
   if (auth !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
-  }
-
-  if (!isGscConfigured()) {
-    return NextResponse.json(
-      { error: "Search Console credentials are not configured." },
-      { status: 501 },
-    );
   }
 
   const startedAt = new Date();

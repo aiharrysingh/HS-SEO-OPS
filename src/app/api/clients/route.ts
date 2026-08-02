@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { getDb, schema } from "@/db";
-import { authGuard } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { deriveBrandTerms } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 /** Create a client, typically from a Search Console property picked on /account. */
 export async function POST(req: Request) {
-  const blocked = await authGuard();
-  if (blocked) return blocked;
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+  }
 
   let body: { name?: string; domain?: string; gscProperty?: string };
   try {
@@ -23,13 +25,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "name and domain are required." }, { status: 400 });
   }
 
+  const gscProperty = body.gscProperty?.trim() || null;
+
   const db = await getDb();
   const [row] = await db
     .insert(schema.clients)
     .values({
       name,
       domain,
-      gscProperty: body.gscProperty?.trim() || null,
+      gscProperty,
+      // Whoever picked this property on /account has read access to it —
+      // that's how it got listed — so their Google sign-in can sync it.
+      gscAuthUserId: gscProperty ? user.id : null,
       brandTerms: deriveBrandTerms(name, domain),
     })
     .returning();

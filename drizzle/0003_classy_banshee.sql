@@ -1,0 +1,2 @@
+ALTER TABLE "clients" ADD COLUMN "gsc_auth_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "clients" ADD CONSTRAINT "clients_gsc_auth_user_id_users_id_fk" FOREIGN KEY ("gsc_auth_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;

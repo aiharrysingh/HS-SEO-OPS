@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { authGuard } from "@/lib/auth";
-import { GscConfigError, isGscConfigured, syncClient } from "@/lib/gsc";
+import { GscConfigError, syncClient } from "@/lib/gsc";
 
 export const dynamic = "force-dynamic";
 
-/** Manual "sync now" from the client screen. */
+/**
+ * Manual "sync now" from the client screen. Whether this client *can* sync
+ * depends on that one client (its own linked Google account, or the shared
+ * service account) — resolved inside `syncClient`, not checked up front here.
+ */
 export async function POST(
   _req: Request,
   { params }: { params: Promise<{ clientId: string }> },
@@ -13,18 +17,6 @@ export async function POST(
   if (blocked) return blocked;
 
   const { clientId } = await params;
-
-  if (!isGscConfigured()) {
-    return NextResponse.json(
-      {
-        error:
-          "Search Console is not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL " +
-          "and GOOGLE_PRIVATE_KEY, then grant that service account read access " +
-          "to the property.",
-      },
-      { status: 501 },
-    );
-  }
 
   try {
     const result = await syncClient(clientId);

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { authGuard } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +10,10 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ clientId: string }> },
 ) {
-  const blocked = await authGuard();
-  if (blocked) return blocked;
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+  }
 
   const { clientId } = await params;
 
@@ -28,7 +30,12 @@ export async function PATCH(
   const db = await getDb();
   const [row] = await db
     .update(schema.clients)
-    .set({ gscProperty: body.gscProperty })
+    .set({
+      gscProperty: body.gscProperty,
+      // This person can see the property on /account because their Google
+      // account has read access to it — use that same grant to sync it.
+      gscAuthUserId: user.id,
+    })
     .where(eq(schema.clients.id, clientId))
     .returning();
 
