@@ -73,6 +73,14 @@ export const clients = pgTable("clients", {
    */
   lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
   lastSyncError: text("last_sync_error"),
+  /**
+   * Set when a sync claims this client, cleared on both success and failure.
+   * Non-null (and not stale — see `SYNC_STALE_AFTER_MINUTES` in gsc.ts) means
+   * a sync is genuinely running right now. This is what lets a page refresh
+   * mid-sync show the truth instead of resetting to "Sync now", and lets a
+   * second sync attempt be rejected instead of racing the first.
+   */
+  syncStartedAt: timestamp("sync_started_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

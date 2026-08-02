@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { addDays, dataCutoff } from "./dates";
 import { clientFromStoredTokens } from "./googleOAuth";
@@ -55,6 +55,31 @@ export type SyncResult = {
 };
 
 export class GscConfigError extends Error {}
+
+/**
+ * A `syncStartedAt` older than this is treated as abandoned (crashed process,
+ * killed dev server, redeploy mid-sync) rather than a real in-progress sync —
+ * otherwise a crash would wedge the button and the duplicate-sync guard
+ * forever. Comfortably longer than any real sync, including a first-ever
+ * 480-day backfill across both dimension pulls; short enough that a
+ * genuinely stuck row doesn't block a client for hours.
+ */
+export const SYNC_STALE_AFTER_MINUTES = 15;
+
+export function isSyncActive(syncStartedAt: Date | null, now = new Date()): boolean {
+  if (!syncStartedAt) return false;
+  return now.getTime() - syncStartedAt.getTime() < SYNC_STALE_AFTER_MINUTES * 60_000;
+}
+
+export class SyncInProgressError extends Error {
+  startedAt: Date;
+  constructor(startedAt: Date) {
+    super(
+      `Already syncing — started ${Math.round((Date.now() - startedAt.getTime()) / 1000)}s ago.`,
+    );
+    this.startedAt = startedAt;
+  }
+}
 
 /** Whether the shared service-account fallback is set up — not the whole story any more, see `resolveAuth`. */
 export function isGscConfigured(): boolean {
@@ -125,6 +150,27 @@ type GscRow = {
 };
 
 /**
+ * Bounds a single Google API call (including the OAuth token refresh gaxios
+ * makes implicitly on the first call, if the stored access token has
+ * expired). Without this, a stalled connection — observed in practice as a
+ * hang with no error, distinct from the fast `ENOTFOUND` DNS failure this
+ * environment also sometimes produces — leaves `syncStartedAt` claimed
+ * indefinitely, with no safe way to recover short of killing the process (and
+ * PGlite does not reliably survive being killed mid-write). A clean timeout
+ * error is far cheaper than that.
+ */
+const GSC_REQUEST_TIMEOUT_MS = 60_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]);
+}
+
+/**
  * Pulls rows for one property along the given dimensions, paging until GSC
  * stops returning data. Row limit is the API maximum.
  *
@@ -147,17 +193,21 @@ async function fetchRows(
   const ROW_LIMIT = 25_000;
 
   for (let startRow = 0; ; startRow += ROW_LIMIT) {
-    const res = await api.searchanalytics.query({
-      siteUrl: property,
-      requestBody: {
-        startDate: start,
-        endDate: end,
-        dimensions,
-        rowLimit: ROW_LIMIT,
-        startRow,
-        dataState: "final",
-      },
-    });
+    const res = await withTimeout(
+      api.searchanalytics.query({
+        siteUrl: property,
+        requestBody: {
+          startDate: start,
+          endDate: end,
+          dimensions,
+          rowLimit: ROW_LIMIT,
+          startRow,
+          dataState: "final",
+        },
+      }),
+      GSC_REQUEST_TIMEOUT_MS,
+      `Search Console didn't respond within ${GSC_REQUEST_TIMEOUT_MS / 1000}s. This looks like a network issue reaching Google from this environment, not a Search Console problem — try again.`,
+    );
 
     const rows = res.data.rows ?? [];
     out.push(...rows);
@@ -201,6 +251,26 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
       `${client.name} has no Search Console property set.`,
     );
   }
+
+  // Atomic claim, not read-then-check — two concurrent requests (a double
+  // click, or a manual sync racing the nightly cron) must not both pass a
+  // check based on a value read before either had written anything.
+  const staleCutoff = new Date(Date.now() - SYNC_STALE_AFTER_MINUTES * 60_000);
+  const [claimed] = await db
+    .update(schema.clients)
+    .set({ syncStartedAt: new Date() })
+    .where(
+      and(
+        eq(schema.clients.id, clientId),
+        or(
+          isNull(schema.clients.syncStartedAt),
+          lt(schema.clients.syncStartedAt, staleCutoff),
+        ),
+      ),
+    )
+    .returning({ syncStartedAt: schema.clients.syncStartedAt });
+
+  if (!claimed) throw new SyncInProgressError(client.syncStartedAt!);
 
   const auth = await resolveAuth(client);
 
@@ -271,7 +341,7 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
 
     await db
       .update(schema.clients)
-      .set({ lastSyncedAt: new Date(), lastSyncError: null })
+      .set({ lastSyncedAt: new Date(), lastSyncError: null, syncStartedAt: null })
       .where(eq(schema.clients.id, clientId));
 
     return {
@@ -290,7 +360,7 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
     // yesterday's numbers as if they were fresh.
     await db
       .update(schema.clients)
-      .set({ lastSyncError: message.slice(0, 500) })
+      .set({ lastSyncError: message.slice(0, 500), syncStartedAt: null })
       .where(eq(schema.clients.id, clientId));
     throw err;
   }

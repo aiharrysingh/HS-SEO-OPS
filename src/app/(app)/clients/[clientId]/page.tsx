@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getClientPerformance } from "@/lib/metrics";
+import { isSyncActive } from "@/lib/gsc";
 import { formatDate } from "@/lib/dates";
 import { compact, full, percent, position } from "@/lib/format";
 import { DataCutoff, SyncStatus } from "@/components/DataCutoff";
@@ -45,6 +46,7 @@ export default async function ClientPage({
   if (!client) notFound();
 
   const perf = await getClientPerformance(clientId, days);
+  const initiallySyncing = isSyncActive(client.syncStartedAt);
 
   return (
     <div className="space-y-6">
@@ -83,7 +85,12 @@ export default async function ClientPage({
           >
             Reports
           </Link>
-          <SyncButton clientId={clientId} />
+          <SyncButton
+            clientId={clientId}
+            initiallySyncing={initiallySyncing}
+            syncStartedAt={initiallySyncing ? client.syncStartedAt!.toISOString() : null}
+            isFirstSync={client.lastSyncedAt === null}
+          />
         </div>
       </header>
 

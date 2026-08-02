@@ -29,6 +29,13 @@
       "when": 1785619358242,
       "tag": "0003_classy_banshee",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785644411140,
+      "tag": "0004_overrated_steel_serpent",
+      "breakpoints": true
     }
   ]
 }

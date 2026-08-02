@@ -1,0 +1,1 @@
+ALTER TABLE "clients" ADD COLUMN "sync_started_at" timestamp with time zone;
