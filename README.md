@@ -3,6 +3,10 @@
 SEO operations tool with a white-label client view. See
 [docs/hs-seo-ops-plan.md](docs/hs-seo-ops-plan.md) for the plan this is built against.
 
+**Picking this up after a break?** Read
+[docs/PROJECT-CONTEXT.md](docs/PROJECT-CONTEXT.md) first — current state, the
+constraints that must not be broken, what's left, and the bugs already fixed.
+
 **All five phases are built.**
 
 - **Phase 1 — Content Performance Tracker.** Every blog and landing page across
