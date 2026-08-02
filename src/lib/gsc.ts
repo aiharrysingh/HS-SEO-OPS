@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { addDays, dataCutoff } from "./dates";
-import { clientFromStoredTokens } from "./googleOAuth";
+import { GSC_SCOPE, resolveGoogleAuth, withTimeout } from "./googleAuth";
 
 /**
  * Google Search Console ingest.
@@ -21,8 +21,6 @@ import { clientFromStoredTokens } from "./googleOAuth";
  *     person's login surviving.
  */
 
-const SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
-
 /**
  * GSC revises recent days after first publishing them. Re-pulling a short tail
  * on every sync keeps the stored numbers matching what the console shows,
@@ -33,13 +31,20 @@ const RESETTLE_DAYS = 5;
 /**
  * How far back the very first sync for a client reaches.
  *
- * 16 months is GSC's own retention limit, and reports need it: the
- * `client-report` standard asks for year-on-year "where the data exists", and
- * anything shorter means the first year of reports simply can't answer it.
- * The first sync for a client is correspondingly slow; every later one resumes
- * from the newest stored date.
+ * This was 480 days (GSC's full 16-month retention) to satisfy the
+ * `client-report` standard's year-on-year comparison. In practice that made
+ * the first sync enormous: the query pull is one row per distinct search term
+ * per day, so a real site can be hundreds of thousands of rows before it ever
+ * finishes — indistinguishable from a hang, and heavy enough to be genuinely
+ * risky against the embedded database.
+ *
+ * 90 days makes the first sync finish quickly and is plenty for the tracker
+ * and the 7/28/90-day windows the UI actually offers. The tradeoff is real
+ * and deliberate: **year-on-year reporting has no data until a client has
+ * been synced for a year**, or until a deeper backfill is run for it
+ * separately. A first sync that never completes serves nobody.
  */
-const INITIAL_BACKFILL_DAYS = 480;
+const INITIAL_BACKFILL_DAYS = 90;
 
 export type SyncResult = {
   clientId: string;
@@ -52,6 +57,8 @@ export type SyncResult = {
   unmatchedUrls: string[];
   /** Rows written to `query_metrics` for the branded split and opportunity terms. */
   queryRowsStored: number;
+  /** Rows written to `country_metrics` for the country filter. */
+  countryRowsStored: number;
 };
 
 export class GscConfigError extends Error {}
@@ -94,50 +101,17 @@ export function isGscConfigured(): boolean {
  * service account. Throws `GscConfigError` (with next steps for either path)
  * only when neither is available.
  */
-async function resolveAuth(client: { gscAuthUserId: string | null }) {
-  if (client.gscAuthUserId) {
-    const db = await getDb();
-    const [user] = await db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.id, client.gscAuthUserId))
-      .limit(1);
-
-    if (user?.refreshToken) {
-      const userId = user.id;
-      const auth = await clientFromStoredTokens({
-        accessToken: user.accessToken,
-        refreshToken: user.refreshToken,
-        expiresAt: user.tokenExpiresAt,
-      });
-      // Same reasoning as gscAccounts.ts: persist whatever the client
-      // refreshes to, or the stored copy goes stale sync after sync.
-      auth.on("tokens", (t) => {
-        const update: Partial<typeof schema.users.$inferInsert> = {};
-        if (t.access_token) update.accessToken = t.access_token;
-        if (t.refresh_token) update.refreshToken = t.refresh_token;
-        if (t.expiry_date) update.tokenExpiresAt = new Date(t.expiry_date);
-        if (Object.keys(update).length > 0) {
-          void db.update(schema.users).set(update).where(eq(schema.users.id, userId));
-        }
-      });
-      return auth;
-    }
-  }
-
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  // Private keys carry literal \n when they come from an env var.
-  const key = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-  if (email && key) {
-    const { google } = await import("googleapis");
-    return new google.auth.JWT({ email, key, scopes: [SCOPE] });
-  }
-
-  throw new GscConfigError(
-    "No way to reach Search Console for this client. Either sign in on " +
-      "/account with a Google account that has access to the property and " +
-      "link it there, or set GOOGLE_SERVICE_ACCOUNT_EMAIL and " +
-      "GOOGLE_PRIVATE_KEY and grant that service account read access to it.",
+function resolveAuth(client: { gscAuthUserId: string | null }) {
+  return resolveGoogleAuth(
+    { authUserId: client.gscAuthUserId, scope: GSC_SCOPE },
+    () => {
+      throw new GscConfigError(
+        "No way to reach Search Console for this client. Either sign in on " +
+          "/account with a Google account that has access to the property and " +
+          "link it there, or set GOOGLE_SERVICE_ACCOUNT_EMAIL and " +
+          "GOOGLE_PRIVATE_KEY and grant that service account read access to it.",
+      );
+    },
   );
 }
 
@@ -149,26 +123,8 @@ type GscRow = {
   position?: number | null;
 };
 
-/**
- * Bounds a single Google API call (including the OAuth token refresh gaxios
- * makes implicitly on the first call, if the stored access token has
- * expired). Without this, a stalled connection — observed in practice as a
- * hang with no error, distinct from the fast `ENOTFOUND` DNS failure this
- * environment also sometimes produces — leaves `syncStartedAt` claimed
- * indefinitely, with no safe way to recover short of killing the process (and
- * PGlite does not reliably survive being killed mid-write). A clean timeout
- * error is far cheaper than that.
- */
+/** Per-request ceiling; see `withTimeout` in googleAuth.ts for why it exists. */
 const GSC_REQUEST_TIMEOUT_MS = 60_000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error(message)), ms);
-    }),
-  ]);
-}
 
 /**
  * Pulls rows for one property along the given dimensions, paging until GSC
@@ -191,8 +147,15 @@ async function fetchRows(
   const api = google.searchconsole({ version: "v1", auth });
   const out: GscRow[] = [];
   const ROW_LIMIT = 25_000;
+  const label = `[gsc] ${property} ${dimensions.join("×")} ${start}..${end}`;
+  const startedAt = Date.now();
 
   for (let startRow = 0; ; startRow += ROW_LIMIT) {
+    // Logged per page: without this, a slow multi-page pull is
+    // indistinguishable from a hang, which is exactly how a very large first
+    // backfill got misdiagnosed as a network failure.
+    console.log(`${label} requesting rows from ${startRow}…`);
+
     const res = await withTimeout(
       api.searchanalytics.query({
         siteUrl: property,
@@ -211,6 +174,9 @@ async function fetchRows(
 
     const rows = res.data.rows ?? [];
     out.push(...rows);
+    console.log(
+      `${label} got ${rows.length} rows (${out.length} total, ${((Date.now() - startedAt) / 1000).toFixed(1)}s)`,
+    );
     if (rows.length < ROW_LIMIT) break;
   }
 
@@ -234,6 +200,132 @@ export function normaliseUrl(raw: string): string {
   } catch {
     return raw.replace(/\/+$/, "").toLowerCase();
   }
+}
+
+export type ImportPagesResult = {
+  clientId: string;
+  /** Distinct URLs Search Console reported in the window. */
+  found: number;
+  /** New `pages` rows created (URLs already tracked are left alone). */
+  created: number;
+  skipped: number;
+};
+
+/**
+ * Turns the URLs Search Console already knows about into tracked `pages` rows.
+ *
+ * The sync deliberately never auto-creates pages — publish date and target
+ * keyword are curated, not derivable — but that left no way to populate the
+ * tracker at all, so every page row GSC returned was discarded as "unmatched".
+ * This is the missing halfway step: it creates the rows with a sensible title
+ * and type guess and leaves `publishedAt`/`targetKeyword` blank for a human to
+ * fill in, which is what the milestone columns need anyway.
+ *
+ * Requests the `page` dimension alone (not `page × date`), so this is one small
+ * result set of distinct URLs rather than a row per page per day.
+ */
+export async function importPagesFromGsc(
+  clientId: string,
+  { days = 90, minImpressions = 1 }: { days?: number; minImpressions?: number } = {},
+): Promise<ImportPagesResult> {
+  const db = await getDb();
+
+  const [client] = await db
+    .select()
+    .from(schema.clients)
+    .where(eq(schema.clients.id, clientId))
+    .limit(1);
+
+  if (!client) throw new Error(`No client ${clientId}`);
+  if (!client.gscProperty) {
+    throw new GscConfigError(`${client.name} has no Search Console property set.`);
+  }
+
+  const auth = await resolveAuth(client);
+  const end = dataCutoff();
+  const start = addDays(end, -(days - 1));
+
+  const rows = await fetchRows(auth, client.gscProperty, ["page"], start, end);
+
+  const existing = await db
+    .select({ url: schema.pages.url })
+    .from(schema.pages)
+    .where(eq(schema.pages.clientId, clientId));
+  const known = new Set(existing.map((p) => normaliseUrl(p.url)));
+
+  const values: (typeof schema.pages.$inferInsert)[] = [];
+  const seen = new Set<string>();
+  let skipped = 0;
+
+  for (const row of rows) {
+    const url = row.keys?.[0];
+    if (!url) continue;
+    if ((row.impressions ?? 0) < minImpressions) {
+      skipped++;
+      continue;
+    }
+    const key = normaliseUrl(url);
+    if (known.has(key) || seen.has(key)) {
+      skipped++;
+      continue;
+    }
+    seen.add(key);
+    values.push({
+      clientId,
+      url,
+      type: guessPageType(url),
+      title: titleFromUrl(url),
+      status: "live",
+      // Left blank on purpose: the milestone columns measure from a real
+      // go-live date, and a guessed one would quietly produce wrong numbers.
+      publishedAt: null,
+      targetKeyword: null,
+    });
+  }
+
+  for (let i = 0; i < values.length; i += 500) {
+    await db
+      .insert(schema.pages)
+      .values(values.slice(i, i + 500))
+      .onConflictDoNothing();
+  }
+
+  return { clientId, found: rows.length, created: values.length, skipped };
+}
+
+/**
+ * Blog-ish paths are the common case worth detecting; everything else is a
+ * landing page. Matches a keyword *within* a path segment, not just a whole
+ * one — real sites use "/tech-insights/…" and "/resource-centre/…" as often as
+ * a bare "/blog/", and requiring an exact segment silently mislabels them.
+ */
+export function guessPageType(url: string): "blog" | "landing" {
+  const path = (() => {
+    try {
+      return new URL(url).pathname.toLowerCase();
+    } catch {
+      return url.toLowerCase();
+    }
+  })();
+  return /\/[^/]*(blog|article|news|insight|resource|tutorial|guide|case-stud)[^/]*\//.test(path)
+    ? "blog"
+    : "landing";
+}
+
+/** Last path segment, de-slugged. Good enough to scan a table by; editable later. */
+function titleFromUrl(url: string): string {
+  let path: string;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    path = url;
+  }
+  const slug = path.replace(/\/+$/, "").split("/").filter(Boolean).pop();
+  if (!slug) return "Home";
+  return slug
+    .replace(/\.(html?|php|aspx?)$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export async function syncClient(clientId: string): Promise<SyncResult> {
@@ -282,7 +374,13 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
   const byUrl = new Map(trackedPages.map((p) => [normaliseUrl(p.url), p.id]));
 
   const end = dataCutoff();
-  const start = await syncStart(clientId, trackedPages.map((p) => p.id), end);
+  const hasCompletedSync = client.lastSyncedAt !== null;
+  const start = await syncStart(
+    clientId,
+    trackedPages.map((p) => p.id),
+    end,
+    hasCompletedSync,
+  );
 
   try {
     const rows = await fetchRows(
@@ -293,8 +391,20 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
       end,
     );
 
-    const values: (typeof schema.pageMetrics.$inferInsert)[] = [];
     const unmatched = new Set<string>();
+    /**
+     * Merged by (pageId, date) rather than pushed straight to a list.
+     *
+     * `normaliseUrl` maps URL variants — trailing slash, `www.`, http vs https,
+     * query strings — onto one tracked page, by design. Search Console still
+     * reports those variants as separate rows, so several can land on the same
+     * page on the same day. Inserting them unmerged puts the same conflict
+     * target twice in one statement, which Postgres rejects outright
+     * ("ON CONFLICT DO UPDATE command cannot affect row a second time") and
+     * which fails the whole sync. Summing is also just the right answer: those
+     * really are the same page's clicks.
+     */
+    const merged = new Map<string, typeof schema.pageMetrics.$inferInsert>();
 
     for (const row of rows) {
       const [url, date] = row.keys ?? [];
@@ -306,15 +416,38 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
         continue;
       }
 
-      values.push({
+      const clicks = Math.round(row.clicks ?? 0);
+      const impressions = Math.round(row.impressions ?? 0);
+      const position = row.position ?? 0;
+
+      const key = `${pageId}|${date}`;
+      const prior = merged.get(key);
+      if (!prior) {
+        merged.set(key, { pageId, date, clicks, impressions, ctr: row.ctr ?? 0, position });
+        continue;
+      }
+
+      const totalImpressions = prior.impressions! + impressions;
+      // Position is an average over impressions, so combining two variants
+      // means weighting by impressions — a plain mean would over-count a
+      // variant with almost no traffic.
+      const weightedPosition =
+        totalImpressions > 0
+          ? (prior.position! * prior.impressions! + position * impressions) / totalImpressions
+          : 0;
+      const totalClicks = prior.clicks! + clicks;
+
+      merged.set(key, {
         pageId,
         date,
-        clicks: Math.round(row.clicks ?? 0),
-        impressions: Math.round(row.impressions ?? 0),
-        ctr: row.ctr ?? 0,
-        position: row.position ?? 0,
+        clicks: totalClicks,
+        impressions: totalImpressions,
+        ctr: totalImpressions > 0 ? totalClicks / totalImpressions : 0,
+        position: weightedPosition,
       });
     }
+
+    const values = [...merged.values()];
 
     for (let i = 0; i < values.length; i += 500) {
       await db
@@ -335,8 +468,16 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
       auth,
       clientId,
       client.gscProperty,
-      start,
       end,
+      hasCompletedSync,
+    );
+
+    const countryRowsStored = await syncCountries(
+      auth,
+      clientId,
+      client.gscProperty,
+      end,
+      hasCompletedSync,
     );
 
     await db
@@ -353,6 +494,7 @@ export async function syncClient(clientId: string): Promise<SyncResult> {
       rowsStored: values.length,
       unmatchedUrls: [...unmatched].slice(0, 50),
       queryRowsStored,
+      countryRowsStored,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -377,17 +519,21 @@ async function syncQueries(
   auth: Awaited<ReturnType<typeof resolveAuth>>,
   clientId: string,
   property: string,
-  pageStart: string,
   end: string,
+  hasCompletedSync: boolean,
 ): Promise<number> {
   const db = await getDb();
 
-  const [latest] = await db
-    .select({ date: schema.queryMetrics.date })
-    .from(schema.queryMetrics)
-    .where(eq(schema.queryMetrics.clientId, clientId))
-    .orderBy(desc(schema.queryMetrics.date))
-    .limit(1);
+  const [latest] = hasCompletedSync
+    ? await db
+        .select({ date: schema.queryMetrics.date })
+        .from(schema.queryMetrics)
+        .where(eq(schema.queryMetrics.clientId, clientId))
+        .orderBy(desc(schema.queryMetrics.date))
+        .limit(1)
+    : // Same reasoning as syncStart: rows left by a failed run carry a recent
+      // max(date) that would permanently mask the days it never reached.
+      [undefined];
 
   const floor = addDays(end, -(INITIAL_BACKFILL_DAYS - 1));
   let start = floor;
@@ -395,8 +541,11 @@ async function syncQueries(
     const resume = addDays(latest.date, -RESETTLE_DAYS);
     start = resume < floor ? floor : resume;
   }
-  // Never reach further back than the page sync already decided to.
-  if (start < pageStart && !latest) start = pageStart;
+  // Deliberately *not* clamped to the page sync's start. This pull keeps its
+  // own resume point precisely so a dimension added after a client was already
+  // syncing can still backfill: clamping to `pageStart` would pin it to
+  // whatever narrow window the page sync happened to need, and the gap would
+  // never be filled on any later run either.
 
   const rows = await fetchRows(auth, property, ["date", "query"], start, end);
 
@@ -437,13 +586,105 @@ async function syncQueries(
   return values.length;
 }
 
-/** Resume from just before the newest stored metric, or backfill on first run. */
+/**
+ * Pulls site-level country × date rows into `country_metrics`.
+ *
+ * Cheap compared to the other two pulls — one row per country per day rather
+ * than per page or per query — so this adds a second or two to a sync, not a
+ * minute. Same resume-point reasoning as `syncQueries`, including the
+ * `hasCompletedSync` guard that stops a half-written table masking the days a
+ * failed run never reached.
+ */
+async function syncCountries(
+  auth: Awaited<ReturnType<typeof resolveAuth>>,
+  clientId: string,
+  property: string,
+  end: string,
+  hasCompletedSync: boolean,
+): Promise<number> {
+  const db = await getDb();
+
+  const [latest] = hasCompletedSync
+    ? await db
+        .select({ date: schema.countryMetrics.date })
+        .from(schema.countryMetrics)
+        .where(eq(schema.countryMetrics.clientId, clientId))
+        .orderBy(desc(schema.countryMetrics.date))
+        .limit(1)
+    : [undefined];
+
+  const floor = addDays(end, -(INITIAL_BACKFILL_DAYS - 1));
+  let start = floor;
+  if (latest) {
+    const resume = addDays(latest.date, -RESETTLE_DAYS);
+    start = resume < floor ? floor : resume;
+  }
+  // Same reasoning as syncQueries: keep this pull's own resume point rather
+  // than clamping to the page sync's window, so a first-time country backfill
+  // isn't pinned to the last few days.
+
+  const rows = await fetchRows(auth, property, ["date", "country"], start, end);
+
+  const values: (typeof schema.countryMetrics.$inferInsert)[] = [];
+  for (const row of rows) {
+    const [date, country] = row.keys ?? [];
+    if (!date || !country) continue;
+    values.push({
+      clientId,
+      date,
+      country: country.toLowerCase(),
+      clicks: Math.round(row.clicks ?? 0),
+      impressions: Math.round(row.impressions ?? 0),
+      ctr: row.ctr ?? 0,
+      position: row.position ?? 0,
+    });
+  }
+
+  for (let i = 0; i < values.length; i += 500) {
+    await db
+      .insert(schema.countryMetrics)
+      .values(values.slice(i, i + 500))
+      .onConflictDoUpdate({
+        target: [
+          schema.countryMetrics.clientId,
+          schema.countryMetrics.date,
+          schema.countryMetrics.country,
+        ],
+        set: {
+          clicks: sql`excluded.clicks`,
+          impressions: sql`excluded.impressions`,
+          ctr: sql`excluded.ctr`,
+          position: sql`excluded.position`,
+        },
+      });
+  }
+
+  return values.length;
+}
+
+/**
+ * Resume from just before the newest stored metric, or backfill on first run.
+ *
+ * `hasCompletedSync` is what stops a half-written table from being mistaken
+ * for a complete one. A sync that dies partway (as one did on the duplicate
+ * conflict-target bug) still leaves rows behind, and those rows carry a recent
+ * `max(date)`. Resuming from that high-water mark skips every day the failed
+ * run never reached — permanently, because each later run resumes from the
+ * same mark. The symptom is a table that looks 90 days deep but has real
+ * coverage only in the last few.
+ *
+ * So: only trust the stored maximum once a sync has actually finished for this
+ * client. Until then, re-request the full backfill. The writes are idempotent
+ * upserts, so re-pulling costs time, never correctness.
+ */
 async function syncStart(
   clientId: string,
   pageIds: string[],
   end: string,
+  hasCompletedSync: boolean,
 ): Promise<string> {
-  if (pageIds.length === 0) return addDays(end, -(INITIAL_BACKFILL_DAYS - 1));
+  const floor = addDays(end, -(INITIAL_BACKFILL_DAYS - 1));
+  if (pageIds.length === 0 || !hasCompletedSync) return floor;
 
   const db = await getDb();
   const [latest] = await db
@@ -453,10 +694,9 @@ async function syncStart(
     .orderBy(desc(schema.pageMetrics.date))
     .limit(1);
 
-  if (!latest) return addDays(end, -(INITIAL_BACKFILL_DAYS - 1));
+  if (!latest) return floor;
 
   const resume = addDays(latest.date, -RESETTLE_DAYS);
-  const floor = addDays(end, -(INITIAL_BACKFILL_DAYS - 1));
   return resume < floor ? floor : resume;
 }
 

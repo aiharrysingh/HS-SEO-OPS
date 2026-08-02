@@ -5,11 +5,20 @@
  * Google account has access to.
  */
 
+/**
+ * Adding a scope here invalidates every stored grant: refresh tokens carry the
+ * scopes they were issued with, so existing users get 403s from the new API
+ * until they sign out and back in. `authorizationUrl()` already sends
+ * `prompt: "consent"` on every sign-in, so a plain re-login picks the new
+ * scope up — there is no incremental-auth dance to run, but somebody does have
+ * to re-authorise. `analytics.readonly` was added for the GA4 screens.
+ */
 const SCOPES = [
   "openid",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
   "https://www.googleapis.com/auth/webmasters.readonly",
+  "https://www.googleapis.com/auth/analytics.readonly",
 ];
 
 export class GoogleOAuthConfigError extends Error {}

@@ -1,15 +1,36 @@
 import Link from "next/link";
 import { getClientSummaries } from "@/lib/metrics";
-import { dataCutoff, trailingWindow } from "@/lib/dates";
+import {
+  RANGE_PRESETS,
+  dataCutoff,
+  daysBetween,
+  isTrailingWindow,
+  parseWindow,
+  windowLabel as describeWindow,
+  withFilters,
+} from "@/lib/dates";
 import { compact, delta, full, percent, position } from "@/lib/format";
 import { DataCutoff, SyncStatus } from "@/components/DataCutoff";
+import { DateRangePicker } from "@/components/DateRangePicker";
 import { Sparkline } from "@/components/Sparkline";
 import { Card, DeltaBadge, EmptyState } from "@/components/ui";
 
-export default async function PortfolioPage() {
-  const summaries = await getClientSummaries(28);
+export const dynamic = "force-dynamic";
+
+export default async function PortfolioPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ days?: string; from?: string; to?: string }>;
+}) {
+  const sp = await searchParams;
+  const window = parseWindow(sp);
   const cutoff = dataCutoff();
-  const window = trailingWindow(28);
+  const summaries = await getClientSummaries(window);
+
+  const windowLabel = describeWindow(window);
+  const rangeDays = daysBetween(window.start, window.end) + 1;
+  const activePreset =
+    RANGE_PRESETS.find((p) => isTrailingWindow(window, p.days))?.days ?? null;
 
   const totals = summaries.reduce(
     (acc, s) => ({
@@ -23,16 +44,24 @@ export default async function PortfolioPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">
-          Portfolio
-        </h1>
-        <p className="mt-1 text-sm text-ink-secondary">
-          Last 28 days across {summaries.length}{" "}
-          {summaries.length === 1 ? "client" : "clients"} and{" "}
-          {full(totals.pages)} tracked pages.
-        </p>
-        <DataCutoff cutoff={cutoff} className="mt-2" />
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">
+            Portfolio
+          </h1>
+          <p className="mt-1 text-sm text-ink-secondary">
+            {windowLabel} across {summaries.length}{" "}
+            {summaries.length === 1 ? "client" : "clients"} and{" "}
+            {full(totals.pages)} tracked pages.
+          </p>
+          <DataCutoff cutoff={cutoff} className="mt-2" />
+        </div>
+        <DateRangePicker
+          window={window}
+          cutoff={cutoff}
+          presets={RANGE_PRESETS}
+          activePreset={activePreset}
+        />
       </header>
 
       {summaries.length === 0 ? (
@@ -54,7 +83,7 @@ export default async function PortfolioPage() {
               <div className="flex items-center gap-1.5 pb-1">
                 <DeltaBadge d={delta(totals.clicks, totals.previousClicks)} />
                 <span className="text-xs text-ink-muted">
-                  vs previous 28 days ({full(totals.previousClicks)})
+                  vs previous {rangeDays} days ({full(totals.previousClicks)})
                 </span>
               </div>
             </div>
@@ -68,7 +97,7 @@ export default async function PortfolioPage() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
                 <caption className="sr-only">
-                  Organic performance by client over the last 28 days
+                  Organic performance by client, {window.start} to {window.end}
                 </caption>
                 <thead>
                   <tr className="border-b border-hairline text-left text-xs text-ink-secondary">
@@ -91,7 +120,7 @@ export default async function PortfolioPage() {
                     >
                       <td className="py-2.5 pl-4 pr-3">
                         <Link
-                          href={`/clients/${s.id}`}
+                          href={withFilters(`/clients/${s.id}`, window)}
                           className="font-medium text-ink hover:underline"
                         >
                           {s.name}

@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { PageRow } from "@/lib/metrics";
-import { MILESTONES, type MilestoneKey } from "@/lib/dates";
+import {
+  MILESTONES,
+  type DateWindow,
+  type MilestoneKey,
+  withFilters,
+} from "@/lib/dates";
 import { compact, delta, full, percent, position } from "@/lib/format";
 import { Sparkline } from "./Sparkline";
 import { Badge, DeltaBadge } from "./ui";
@@ -30,10 +35,13 @@ export function PagesTable({
   clientId,
   pages,
   windowLabel,
+  window,
 }: {
   clientId: string;
   pages: PageRow[];
   windowLabel: string;
+  /** Carried onto each row link so the active range survives the click. */
+  window: DateWindow;
 }) {
   const [view, setView] = useState<View>("current");
   const [query, setQuery] = useState("");
@@ -230,7 +238,10 @@ export function PagesTable({
               >
                 <td className="max-w-[380px] py-2.5 pl-4 pr-3">
                   <Link
-                    href={`/clients/${clientId}/pages/${p.id}`}
+                    href={withFilters(
+                      `/clients/${clientId}/pages/${p.id}`,
+                      window,
+                    )}
                     className="block truncate font-medium text-ink hover:underline"
                     title={p.title}
                   >

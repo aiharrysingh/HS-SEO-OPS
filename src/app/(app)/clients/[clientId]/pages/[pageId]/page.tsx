@@ -1,9 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPageDetail } from "@/lib/metrics";
-import { MILESTONES, formatDate } from "@/lib/dates";
+import {
+  MILESTONES,
+  RANGE_PRESETS,
+  daysBetween,
+  formatDate,
+  isTrailingWindow,
+  parseWindow,
+  windowLabel as describeWindow,
+  withFilters,
+} from "@/lib/dates";
 import { compact, full, percent, position } from "@/lib/format";
 import { DataCutoff } from "@/components/DataCutoff";
+import { DateRangePicker } from "@/components/DateRangePicker";
 import { TimeSeriesChart } from "@/components/TimeSeriesChart";
 import { Badge, Card, CardHeader, StatTile } from "@/components/ui";
 
@@ -11,21 +21,38 @@ export const dynamic = "force-dynamic";
 
 export default async function PageDetail({
   params,
+  searchParams,
 }: {
   params: Promise<{ clientId: string; pageId: string }>;
+  searchParams: Promise<{ days?: string; from?: string; to?: string }>;
 }) {
   const { clientId, pageId } = await params;
-  const detail = await getPageDetail(pageId);
+  const sp = await searchParams;
+  const window = parseWindow(sp);
+  const detail = await getPageDetail(pageId, window);
 
   if (!detail || detail.page.clientId !== clientId) notFound();
 
   const { page, client } = detail;
+  const windowLabel = describeWindow(window);
+  const rangeDays = daysBetween(window.start, window.end) + 1;
+  const activePreset =
+    RANGE_PRESETS.find((p) => isTrailingWindow(window, p.days))?.days ?? null;
 
   return (
     <div className="space-y-6">
-      <header>
+      <header className="relative">
+        <div className="absolute right-0 top-0">
+          <DateRangePicker
+            window={detail.window}
+            cutoff={detail.cutoff}
+            presets={RANGE_PRESETS}
+            activePreset={activePreset}
+          />
+        </div>
+
         <Link
-          href={`/clients/${clientId}`}
+          href={withFilters(`/clients/${clientId}`, window)}
           className="text-xs text-ink-secondary hover:underline"
         >
           ← {client.name}
@@ -68,16 +95,18 @@ export default async function PageDetail({
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
-          label="Clicks, last 28 days"
+          label={`Clicks, ${windowLabel.toLowerCase()}`}
           value={full(detail.current.clicks)}
           current={detail.current.clicks}
           previous={detail.previous.clicks}
+          comparisonLabel={`vs previous ${rangeDays} days`}
         />
         <StatTile
-          label="Impressions, last 28 days"
+          label={`Impressions, ${windowLabel.toLowerCase()}`}
           value={compact(detail.current.impressions)}
           current={detail.current.impressions}
           previous={detail.previous.impressions}
+          comparisonLabel={`vs previous ${rangeDays} days`}
         />
         <StatTile
           label="Average position"
@@ -86,7 +115,7 @@ export default async function PageDetail({
           previous={detail.previous.position ?? 0}
           lowerIsBetter
           unit="places"
-          comparisonLabel="vs previous 28 days"
+          comparisonLabel={`vs previous ${rangeDays} days`}
         />
         <StatTile
           label="Clicks since go-live"

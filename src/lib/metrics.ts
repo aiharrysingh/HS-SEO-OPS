@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, inArray, isNotNull, lte, sql } from "drizzle-o
 import { getDb, schema } from "@/db";
 import type { PageStatus, PageType } from "@/db/schema";
 import {
+  DEFAULT_RANGE_DAYS,
   MILESTONES,
   type DateWindow,
   type MilestoneKey,
@@ -95,12 +96,11 @@ export type ClientPerformance = {
  */
 export async function getClientPerformance(
   clientId: string,
-  days = 28,
+  window: DateWindow = trailingWindow(DEFAULT_RANGE_DAYS),
 ): Promise<ClientPerformance> {
   const db = await getDb();
   const cutoff = dataCutoff();
   const now = Date.now();
-  const window = trailingWindow(days);
   const prev = previousWindow(window);
 
   const pages = await db
@@ -258,11 +258,12 @@ export type ClientSummary = {
   daily: number[];
 };
 
-/** Portfolio view: one row per client with a 28-day rollup and trend. */
-export async function getClientSummaries(days = 28): Promise<ClientSummary[]> {
+/** Portfolio view: one row per client rolled up over `window`, with a trend. */
+export async function getClientSummaries(
+  window: DateWindow = trailingWindow(DEFAULT_RANGE_DAYS),
+): Promise<ClientSummary[]> {
   const db = await getDb();
   const now = Date.now();
-  const window = trailingWindow(days);
   const prev = previousWindow(window);
 
   const clients = await db
@@ -343,6 +344,9 @@ export type PageDetail = {
   page: typeof schema.pages.$inferSelect;
   client: typeof schema.clients.$inferSelect;
   cutoff: string;
+  /** The window `current`/`previous` cover, so the screen can label them. */
+  window: DateWindow;
+  previousWindow: DateWindow;
   lifetime: Totals;
   current: Totals;
   previous: Totals;
@@ -357,6 +361,7 @@ export type PageDetail = {
 
 export async function getPageDetail(
   pageId: string,
+  window: DateWindow = trailingWindow(DEFAULT_RANGE_DAYS),
 ): Promise<PageDetail | null> {
   const db = await getDb();
   const cutoff = dataCutoff();
@@ -370,7 +375,6 @@ export async function getPageDetail(
 
   if (!row) return null;
 
-  const window = trailingWindow(28);
   const prev = previousWindow(window);
 
   const totalsFor = (w?: DateWindow) =>
@@ -424,12 +428,143 @@ export async function getPageDetail(
     page: row.page,
     client: row.client,
     cutoff,
+    window,
+    previousWindow: prev,
     lifetime: withCtr(lifetime[0] ?? EMPTY),
     current: withCtr(current[0] ?? EMPTY),
     previous: withCtr(previous[0] ?? EMPTY),
     milestones,
     daily,
   };
+}
+
+/* ------------------------------ countries -------------------------------- */
+
+/**
+ * Aggregate over `country_metrics`. Separate from `AGG` because that one is
+ * bound to `page_metrics` columns.
+ */
+const COUNTRY_AGG = {
+  clicks: sql<number>`coalesce(sum(${schema.countryMetrics.clicks}), 0)::int`,
+  impressions: sql<number>`coalesce(sum(${schema.countryMetrics.impressions}), 0)::int`,
+  position: sql<number | null>`case when sum(${schema.countryMetrics.impressions}) > 0
+       then sum(${schema.countryMetrics.position} * ${schema.countryMetrics.impressions})
+            / sum(${schema.countryMetrics.impressions})
+       else null end`,
+};
+
+export type CountryRow = {
+  /** ISO-3166-1 alpha-3, lowercase. */
+  country: string;
+  current: Totals;
+  previous: Totals;
+};
+
+/**
+ * Site-wide totals and daily series for a country selection.
+ *
+ * **This is a different basis from `getClientPerformance`, deliberately.**
+ * That function sums the client's *tracked pages*; this reads GSC's
+ * property-wide country totals. The two will not reconcile — a property always
+ * has traffic on URLs nobody has added to `pages` — so any screen showing both
+ * has to say which it is showing. Silently swapping one for the other when a
+ * filter is applied would move the number for reasons the reader can't see.
+ *
+ * An empty `countries` list means every country, i.e. the property total.
+ */
+export async function getCountryPerformance(
+  clientId: string,
+  window: DateWindow,
+  countries: string[] = [],
+): Promise<{
+  totals: Totals;
+  previousTotals: Totals;
+  daily: { date: string; clicks: number; impressions: number }[];
+}> {
+  const db = await getDb();
+  const prev = previousWindow(window);
+
+  const scope = (w: DateWindow) =>
+    and(
+      eq(schema.countryMetrics.clientId, clientId),
+      gte(schema.countryMetrics.date, w.start),
+      lte(schema.countryMetrics.date, w.end),
+      countries.length > 0
+        ? inArray(schema.countryMetrics.country, countries)
+        : undefined,
+    );
+
+  const [current, previous, dailyRows] = await Promise.all([
+    db.select(COUNTRY_AGG).from(schema.countryMetrics).where(scope(window)),
+    db.select(COUNTRY_AGG).from(schema.countryMetrics).where(scope(prev)),
+    db
+      .select({
+        date: schema.countryMetrics.date,
+        clicks: sql<number>`coalesce(sum(${schema.countryMetrics.clicks}), 0)::int`,
+        impressions: sql<number>`coalesce(sum(${schema.countryMetrics.impressions}), 0)::int`,
+      })
+      .from(schema.countryMetrics)
+      .where(scope(window))
+      .groupBy(schema.countryMetrics.date)
+      .orderBy(asc(schema.countryMetrics.date)),
+  ]);
+
+  // Densify so a day with no rows plots as zero rather than shortening the
+  // series and silently shifting the x-axis.
+  const byDate = new Map(dailyRows.map((r) => [r.date, r]));
+  const daily = dailySpan(window).map((date) => ({
+    date,
+    clicks: Number(byDate.get(date)?.clicks ?? 0),
+    impressions: Number(byDate.get(date)?.impressions ?? 0),
+  }));
+
+  return {
+    totals: withCtr(current[0] ?? EMPTY),
+    previousTotals: withCtr(previous[0] ?? EMPTY),
+    daily,
+  };
+}
+
+/**
+ * Every country this client has data for in the window, biggest first.
+ *
+ * Powers both the country picker (so it offers only countries that actually
+ * appear, not a list of 250) and the breakdown table.
+ */
+export async function getCountryBreakdown(
+  clientId: string,
+  window: DateWindow,
+): Promise<CountryRow[]> {
+  const db = await getDb();
+  const prev = previousWindow(window);
+
+  const byCountry = (w: DateWindow) =>
+    db
+      .select({ country: schema.countryMetrics.country, ...COUNTRY_AGG })
+      .from(schema.countryMetrics)
+      .where(
+        and(
+          eq(schema.countryMetrics.clientId, clientId),
+          gte(schema.countryMetrics.date, w.start),
+          lte(schema.countryMetrics.date, w.end),
+        ),
+      )
+      .groupBy(schema.countryMetrics.country);
+
+  const [currentRows, previousRows] = await Promise.all([
+    byCountry(window),
+    byCountry(prev),
+  ]);
+
+  const prevByCountry = indexBy(previousRows, "country");
+
+  return currentRows
+    .map((r) => ({
+      country: r.country,
+      current: withCtr(r),
+      previous: prevByCountry.get(r.country) ?? EMPTY,
+    }))
+    .sort((a, b) => b.current.clicks - a.current.clicks || b.current.impressions - a.current.impressions);
 }
 
 /* ------------------------------- helpers -------------------------------- */

@@ -168,6 +168,47 @@ export const queryMetrics = pgTable(
   ],
 );
 
+/**
+ * One row per client per day per country, site-level.
+ *
+ * Deliberately site-level and nothing finer. Country is a *combinable* GSC
+ * dimension, so `page × date × country` or `query × date × country` would
+ * multiply the row count by the number of countries a site ranks in — for a
+ * site already producing ~400k query rows a quarter, that is millions of rows
+ * to answer a question the dashboard asks at site level anyway.
+ *
+ * The consequence is worth stating plainly because the UI has to: filtering by
+ * country can only ever move site totals. `page_metrics` and `query_metrics`
+ * stay country-agnostic, so a country-filtered view cannot break down by page
+ * or query, and the screens say so rather than implying otherwise.
+ *
+ * Volume here is small — roughly (countries a site ranks in) × days, so low
+ * thousands of rows per client per quarter.
+ */
+export const countryMetrics = pgTable(
+  "country_metrics",
+  {
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    /** ISO-3166-1 alpha-3, lowercase, exactly as GSC returns it (e.g. "ind"). */
+    country: text("country").notNull(),
+    clicks: integer("clicks").notNull().default(0),
+    impressions: integer("impressions").notNull().default(0),
+    ctr: real("ctr").notNull().default(0),
+    position: real("position").notNull().default(0),
+  },
+  (t) => [
+    unique("country_metrics_client_date_country_unique").on(
+      t.clientId,
+      t.date,
+      t.country,
+    ),
+    index("country_metrics_client_date_idx").on(t.clientId, t.date),
+  ],
+);
+
 export const reports = pgTable(
   "reports",
   {
@@ -267,5 +308,6 @@ export type Client = typeof clients.$inferSelect;
 export type Page = typeof pages.$inferSelect;
 export type PageMetric = typeof pageMetrics.$inferSelect;
 export type QueryMetric = typeof queryMetrics.$inferSelect;
+export type CountryMetric = typeof countryMetrics.$inferSelect;
 export type Report = typeof reports.$inferSelect;
 export type Audit = typeof audits.$inferSelect;

@@ -106,6 +106,121 @@ export function formatWindow(w: DateWindow): string {
   return `${formatDate(w.start)} – ${formatDate(w.end)}`;
 }
 
+/** The presets offered in the UI, and the fallback when no range is given. */
+export const RANGE_PRESETS = [
+  { days: 7, label: "7 days" },
+  { days: 28, label: "28 days" },
+  { days: 90, label: "90 days" },
+] as const;
+
+export const DEFAULT_RANGE_DAYS = 28;
+
+/**
+ * Longest range we will accept. GSC retains 16 months, so anything beyond this
+ * can only return empty days — better to clamp than to render a mostly-blank
+ * chart that looks like a data loss.
+ */
+export const MAX_RANGE_DAYS = 480;
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidIsoDate(s: string | undefined): s is string {
+  if (!s || !ISO_DATE.test(s)) return false;
+  const d = parseIsoDate(s);
+  // Rejects "2026-02-31" and friends, which Date happily rolls over.
+  return !Number.isNaN(d.getTime()) && toIsoDate(d) === s;
+}
+
+/**
+ * Resolves the window a screen should show from its URL search params.
+ *
+ * Accepts either an explicit `from`/`to` range or a `days` preset, and is
+ * deliberately total: anything malformed, reversed, or out of range falls back
+ * to the default window rather than throwing. A hand-edited URL should never
+ * be able to 500 a dashboard.
+ *
+ * `end` is always clamped to `dataCutoff()` so the GSC lag decision at the top
+ * of this file stays the single source of truth — a user cannot ask for days
+ * Google has not settled yet.
+ */
+export function parseWindow(
+  params: { from?: string; to?: string; days?: string } = {},
+  now: Date = new Date(),
+): DateWindow {
+  const cutoff = dataCutoff(now);
+
+  if (isValidIsoDate(params.from) && isValidIsoDate(params.to)) {
+    // Tolerate a reversed range rather than rejecting it.
+    let [start, end] =
+      params.from <= params.to
+        ? [params.from, params.to]
+        : [params.to, params.from];
+
+    if (end > cutoff) end = cutoff;
+    if (start > end) start = end;
+    if (daysBetween(start, end) + 1 > MAX_RANGE_DAYS) {
+      start = addDays(end, -(MAX_RANGE_DAYS - 1));
+    }
+    return { start, end };
+  }
+
+  const days = Number(params.days);
+  if (Number.isInteger(days) && days > 0) {
+    return trailingWindow(Math.min(days, MAX_RANGE_DAYS), now);
+  }
+
+  return trailingWindow(DEFAULT_RANGE_DAYS, now);
+}
+
+/**
+ * How a window should be described in a label.
+ *
+ * A window that is simply the last N days ending at the cutoff reads as
+ * "Last 28 days" — the phrasing the screens used before custom ranges existed.
+ * Anything else is spelled out in full, because "last 43 days" tells a reader
+ * nothing about which 43 days they are looking at.
+ */
+export function windowLabel(w: DateWindow, now: Date = new Date()): string {
+  const len = daysBetween(w.start, w.end) + 1;
+  if (w.end === dataCutoff(now)) return `Last ${len} days`;
+  return formatWindow(w);
+}
+
+/** True when this is a plain trailing window of exactly `days`, for preset highlighting. */
+export function isTrailingWindow(
+  w: DateWindow,
+  days: number,
+  now: Date = new Date(),
+): boolean {
+  const t = trailingWindow(days, now);
+  return t.start === w.start && t.end === w.end;
+}
+
+/**
+ * Carries the active filters onto another in-app link.
+ *
+ * Without this a filter is a toy: clicking into a page and back silently
+ * resets the range you were looking at.
+ */
+export function withFilters(
+  href: string,
+  w: DateWindow,
+  extra: Record<string, string | undefined> = {},
+  now: Date = new Date(),
+): string {
+  const params = new URLSearchParams();
+  // Only spell the range out when it isn't the default, to keep URLs clean.
+  if (!isTrailingWindow(w, DEFAULT_RANGE_DAYS, now)) {
+    params.set("from", w.start);
+    params.set("to", w.end);
+  }
+  for (const [k, v] of Object.entries(extra)) {
+    if (v) params.set(k, v);
+  }
+  const qs = params.toString();
+  return qs ? `${href}?${qs}` : href;
+}
+
 /**
  * The window for a page's milestone, measured from its publish date.
  * Returns null when the milestone has not fully elapsed yet — a half-finished
