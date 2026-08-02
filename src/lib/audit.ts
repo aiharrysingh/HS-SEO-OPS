@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { withTimeout } from "./googleAuth";
 
 /**
  * Landing page audits (plan §3 Phase 4), implementing the `seo-audit-runner`
@@ -18,6 +19,17 @@ import { getDb, schema } from "@/db";
  */
 
 const FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * PageSpeed Insights needs far longer than a page fetch: the request runs a
+ * full Lighthouse pass against the URL server-side. Measured at 20–75s for a
+ * real site, varying with how busy Google's runners are.
+ *
+ * Both earlier values were too low, and each failure looked like something it
+ * wasn't — at 15s and 60s the audit reported "did not respond", implying the
+ * API was down when it was working perfectly and simply hadn't finished.
+ */
+const PAGESPEED_TIMEOUT_MS = 120_000;
 const SAMPLE_SIZE = 25;
 const CONCURRENCY = 4;
 const PAUSE_MS = 400;
@@ -62,6 +74,20 @@ export type AuditResult = {
   sources: string[];
   findings: AuditFinding[];
   notRun: string[];
+  /**
+   * The measured vitals, kept even when every threshold passes.
+   *
+   * A finding only fires on failure, so storing the numbers separately is what
+   * lets the dashboard show "LCP 2.1s, passing" rather than silence — and lets
+   * a later audit compare against it.
+   */
+  cwv: {
+    lcp: number;
+    inp: number;
+    cls: number;
+    source: "field" | "lab";
+    thresholds: { lcp: number; inp: number; cls: number };
+  } | null;
 };
 
 const SEVERITY_RANK: Record<AuditSeverity, number> = {
@@ -73,9 +99,10 @@ const SEVERITY_RANK: Record<AuditSeverity, number> = {
 
 async function fetchText(
   url: string,
+  timeoutMs = FETCH_TIMEOUT_MS,
 ): Promise<{ ok: boolean; status: number; text: string; finalUrl: string } | null> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
@@ -181,32 +208,36 @@ type Cwv =
  */
 async function fetchCwv(url: string): Promise<Cwv> {
   const key = process.env.PAGESPEED_API_KEY;
-  const api = new URL("https://www.googleapis.com/pagespeedonline/v5/runPagespeed");
-  api.searchParams.set("url", url);
-  api.searchParams.set("strategy", "MOBILE");
-  if (key) api.searchParams.set("key", key);
 
-  const res = await fetchText(api.toString());
-  if (!res) return { ok: false, reason: "PageSpeed Insights did not respond." };
-  if (!res.ok) {
-    if (res.status === 429) {
-      return {
-        ok: false,
-        reason: key
-          ? "PageSpeed Insights daily quota exceeded for this API key."
-          : "PageSpeed Insights quota exceeded on the shared anonymous allowance — set PAGESPEED_API_KEY to get your own.",
-      };
-    }
-    return { ok: false, reason: `PageSpeed Insights returned HTTP ${res.status}.` };
-  }
-
+  /**
+   * Called through `googleapis` rather than `fetch` on purpose.
+   *
+   * A PageSpeed response is a Lighthouse report — hundreds of kilobytes of
+   * gzipped JSON — and Node's built-in fetch (undici) throws an uncatchable
+   * `TransformError` decompressing it, which surfaced as a bogus "did not
+   * respond" while curl fetched the same URL in 20 seconds. `googleapis` uses
+   * gaxios over node:https and handles it, and it is already a dependency for
+   * Search Console and GA4.
+   */
   try {
-    const data = JSON.parse(res.text) as {
-      loadingExperience?: { metrics?: Record<string, { percentile?: number }> };
-      lighthouseResult?: { audits?: Record<string, { numericValue?: number }> };
-    };
+    const { google } = await import("googleapis");
+    const pagespeed = google.pagespeedonline({ version: "v5" });
+    const { data } = await withTimeout(
+      pagespeed.pagespeedapi.runpagespeed({
+        url,
+        strategy: "MOBILE",
+        // Only the performance category is needed, and asking for less keeps
+        // the payload down.
+        category: ["PERFORMANCE"],
+        key,
+      }),
+      PAGESPEED_TIMEOUT_MS,
+      `PageSpeed Insights did not respond within ${PAGESPEED_TIMEOUT_MS / 1000}s.`,
+    );
 
-    const field = data.loadingExperience?.metrics;
+    const field = data.loadingExperience?.metrics as
+      | Record<string, { percentile?: number }>
+      | undefined;
     if (field?.LARGEST_CONTENTFUL_PAINT_MS?.percentile !== undefined) {
       return {
         ok: true,
@@ -217,7 +248,9 @@ async function fetchCwv(url: string): Promise<Cwv> {
       };
     }
 
-    const lab = data.lighthouseResult?.audits;
+    const lab = data.lighthouseResult?.audits as
+      | Record<string, { numericValue?: number }>
+      | undefined;
     if (lab?.["largest-contentful-paint"]?.numericValue !== undefined) {
       return {
         ok: true,
@@ -227,10 +260,22 @@ async function fetchCwv(url: string): Promise<Cwv> {
         source: "lab",
       };
     }
-  } catch {
-    // Fall through — a malformed response is a check that didn't run.
+    return { ok: false, reason: "PageSpeed Insights returned no usable metrics." };
+  } catch (err) {
+    // Report what actually went wrong rather than a generic failure — the
+    // difference between "quota exhausted" and "site unreachable" is the
+    // difference between a two-minute fix and a real problem.
+    const message = err instanceof Error ? err.message : String(err);
+    if (/quota|rate limit|429/i.test(message)) {
+      return {
+        ok: false,
+        reason: key
+          ? "PageSpeed Insights daily quota exceeded for this API key."
+          : "PageSpeed Insights quota exceeded on the shared anonymous allowance — set PAGESPEED_API_KEY to get your own.",
+      };
+    }
+    return { ok: false, reason: `PageSpeed Insights failed: ${message.slice(0, 160)}` };
   }
-  return { ok: false, reason: "PageSpeed Insights returned no usable metrics." };
 }
 
 /* -------------------------------- runner --------------------------------- */
@@ -603,6 +648,15 @@ export async function runAudit(clientId: string): Promise<AuditResult> {
     sources,
     findings,
     notRun,
+    cwv: cwv.ok
+      ? {
+          lcp: cwv.lcp,
+          inp: cwv.inp,
+          cls: cwv.cls,
+          source: cwv.source,
+          thresholds: CWV,
+        }
+      : null,
   };
 }
 

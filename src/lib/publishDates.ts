@@ -1,6 +1,7 @@
 import { and, eq, isNull, ne } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { dataCutoff, toIsoDate } from "./dates";
+import { titleFromUrl } from "./gsc";
 
 /**
  * Filling in publish dates so the milestone columns can work.
@@ -44,9 +45,31 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Nothing before this is a plausible publish date for a page we track. */
 const EARLIEST_PLAUSIBLE = "1995-01-01";
 
+/**
+ * The page's own `<title>`, which is the real thing rather than a guess.
+ *
+ * Import derives a title from the URL slug because Search Console only returns
+ * URLs — so "Web Development Life Cycle" was inferred, not read. Since this
+ * pass already downloads every page, taking the actual title costs nothing and
+ * replaces a derived value with a true one.
+ */
+export function detectTitle(html: string): string | null {
+  const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (!m) return null;
+  const title = m[1]
+    .replace(/\s+/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&[a-z]+;/gi, " ")
+    .trim();
+  return title.length > 0 && title.length <= 300 ? title : null;
+}
+
 export type DateDetectionResult = {
   scanned: number;
   dated: number;
+  /** Pages whose derived title was replaced with the page's real one. */
+  titled: number;
   /** Fetched fine but stated no publish date we trust. */
   undated: number;
   failed: number;
@@ -182,7 +205,11 @@ export async function detectPublishDatesForClient(
   const db = await getDb();
 
   const undatedPages = await db
-    .select({ id: schema.pages.id, url: schema.pages.url })
+    .select({
+      id: schema.pages.id,
+      url: schema.pages.url,
+      title: schema.pages.title,
+    })
     .from(schema.pages)
     .where(
       and(
@@ -196,6 +223,7 @@ export async function detectPublishDatesForClient(
 
   const batch = undatedPages.slice(0, limit);
   let dated = 0;
+  let titled = 0;
   let undated = 0;
   let failed = 0;
   const samples: { url: string; date: string; source: string }[] = [];
@@ -209,8 +237,14 @@ export async function detectPublishDatesForClient(
     const results = await Promise.all(
       slice.map(async (page) => {
         const html = await fetchHtml(page.url);
-        if (html === null) return { page, found: null, failed: true };
-        return { page, found: detectPublishDate(html), failed: false };
+        if (html === null)
+          return { page, found: null, realTitle: null, failed: true };
+        return {
+          page,
+          found: detectPublishDate(html),
+          realTitle: detectTitle(html),
+          failed: false,
+        };
       }),
     );
     scanned += slice.length;
@@ -222,13 +256,37 @@ export async function detectPublishDatesForClient(
         failedInBatch++;
         continue;
       }
+
+      /**
+       * Only replace a title that is still the slug-derived guess.
+       *
+       * Anything else has been curated by a person — overwriting their wording
+       * with whatever the CMS puts in `<title>` would quietly undo real work.
+       */
+      const update: Partial<typeof schema.pages.$inferInsert> = {};
+      if (
+        r.realTitle &&
+        r.realTitle !== r.page.title &&
+        r.page.title === titleFromUrl(r.page.url)
+      ) {
+        update.title = r.realTitle;
+        titled++;
+      }
+
       if (!r.found) {
+        if (Object.keys(update).length > 0) {
+          await db
+            .update(schema.pages)
+            .set(update)
+            .where(eq(schema.pages.id, r.page.id));
+        }
         undated++;
         continue;
       }
+      update.publishedAt = r.found.date;
       await db
         .update(schema.pages)
-        .set({ publishedAt: r.found.date })
+        .set(update)
         .where(eq(schema.pages.id, r.page.id));
       dated++;
       if (samples.length < 5) {
@@ -259,6 +317,7 @@ export async function detectPublishDatesForClient(
   return {
     scanned,
     dated,
+    titled,
     undated,
     failed,
     remaining: undatedPages.length - dated,

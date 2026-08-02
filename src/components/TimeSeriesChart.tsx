@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { formatDateShort, formatDate } from "@/lib/dates";
+import { formatDateAxis, formatDateShort, formatDate } from "@/lib/dates";
 import { compact, full } from "@/lib/format";
 
 export type SeriesPoint = { date: string; value: number };
@@ -53,6 +53,28 @@ export function TimeSeriesChart({
 
   const { ticks, max } = useMemo(() => niceScale(points.map((p) => p.value)), [points]);
 
+  /**
+   * Whether the series crosses a calendar year.
+   *
+   * With 16 months of history a window can span one, and a bare "3 Jun" tick
+   * is then genuinely ambiguous — the reader cannot tell which year they are
+   * looking at. Only pay the extra label width when it actually matters.
+   */
+  const spansYears = useMemo(() => {
+    if (points.length < 2) return false;
+    return points[0].date.slice(0, 4) !== points[points.length - 1].date.slice(0, 4);
+  }, [points]);
+
+  /**
+   * Tick count scales with plot width rather than being fixed at five: over a
+   * 480-day range five labels is one every ~3 months, which tells you almost
+   * nothing about where you are in the series.
+   */
+  const tickCount = useMemo(() => {
+    const perLabel = spansYears ? 92 : 74;
+    return Math.max(2, Math.min(8, Math.floor(plotW / perLabel)));
+  }, [plotW, spansYears]);
+
   const x = useCallback(
     (i: number) =>
       M.left + (points.length <= 1 ? plotW / 2 : (i / (points.length - 1)) * plotW),
@@ -91,12 +113,25 @@ export function TimeSeriesChart({
 
   const onKey = (e: React.KeyboardEvent) => {
     if (points.length === 0) return;
+    const clamp = (i: number) => Math.max(0, Math.min(points.length - 1, i));
+
     if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
       e.preventDefault();
-      setActive((a) => {
-        const next = (a ?? 0) + (e.key === "ArrowRight" ? 1 : -1);
-        return Math.max(0, Math.min(points.length - 1, next));
-      });
+      const dir = e.key === "ArrowRight" ? 1 : -1;
+      // Crossing a 16-month series one day at a time is 480 keypresses, so
+      // PageUp/PageDown-sized jumps are available on the arrows too.
+      const step = e.shiftKey ? Math.max(1, Math.round(points.length / 12)) : 1;
+      setActive((a) => clamp((a ?? 0) + dir * step));
+    } else if (e.key === "PageUp" || e.key === "PageDown") {
+      e.preventDefault();
+      const dir = e.key === "PageDown" ? 1 : -1;
+      setActive((a) => clamp((a ?? 0) + dir * Math.max(1, Math.round(points.length / 12))));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActive(points.length - 1);
     } else if (e.key === "Escape") {
       setActive(null);
     }
@@ -178,7 +213,7 @@ export function TimeSeriesChart({
           shapeRendering="crispEdges"
         />
 
-        {xTickIndexes(points.length).map((i) => (
+        {xTickIndexes(points.length, tickCount).map((i) => (
           <text
             key={i}
             x={x(i)}
@@ -187,7 +222,9 @@ export function TimeSeriesChart({
             fontSize={11}
             fill="var(--ink-muted)"
           >
-            {formatDateShort(points[i].date)}
+            {spansYears
+              ? formatDateAxis(points[i].date)
+              : formatDateShort(points[i].date)}
           </text>
         ))}
 
@@ -249,10 +286,11 @@ function niceScale(values: number[]): { ticks: number[]; max: number } {
 }
 
 /** First, last, and a few evenly spaced dates — never every day. */
-function xTickIndexes(n: number): number[] {
+function xTickIndexes(n: number, want = 5): number[] {
   if (n <= 1) return [0];
-  const want = Math.min(5, n);
+  const count = Math.min(want, n);
+  if (count < 2) return [0];
   const out = new Set<number>();
-  for (let i = 0; i < want; i++) out.add(Math.round((i / (want - 1)) * (n - 1)));
+  for (let i = 0; i < count; i++) out.add(Math.round((i / (count - 1)) * (n - 1)));
   return [...out].sort((a, b) => a - b);
 }

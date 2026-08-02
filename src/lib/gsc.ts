@@ -320,7 +320,7 @@ export function guessPageType(url: string): "blog" | "landing" {
 }
 
 /** Last path segment, de-slugged. Good enough to scan a table by; editable later. */
-function titleFromUrl(url: string): string {
+export function titleFromUrl(url: string): string {
   let path: string;
   try {
     path = new URL(url).pathname;

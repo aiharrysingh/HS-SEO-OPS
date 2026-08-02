@@ -28,6 +28,7 @@ import { SyncButton } from "@/components/SyncButton";
 import { ImportPagesButton } from "@/components/ImportPagesButton";
 import { DetectDatesButton } from "@/components/DetectDatesButton";
 import { ClientAccessButton } from "@/components/ClientAccessButton";
+import { ClientActionsMenu } from "@/components/ClientActionsMenu";
 import {
   Card,
   CardHeader,
@@ -149,43 +150,20 @@ export default async function ClientPage({
             selected={countries}
             label={countriesLabel(countries)}
           />
-          <Link
-            href={withFilters(`/clients/${clientId}/content`, window)}
-            className="rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-page"
-          >
-            Content
-          </Link>
-          <Link
-            href={withFilters(`/clients/${clientId}/audits`, window)}
-            className="rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-page"
-          >
-            Audit
-          </Link>
-          <Link
-            href={withFilters(`/clients/${clientId}/analytics`, window, {
-              country: sp.country,
-            })}
-            className="rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-page"
-          >
-            Analytics
-          </Link>
-          <Link
-            href={withFilters(`/clients/${clientId}/reports`, window, {
-              country: sp.country,
-            })}
-            className="rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-page"
-          >
-            Reports
-          </Link>
-          <ClientAccessButton clientId={clientId} />
-          <ImportPagesButton clientId={clientId} />
-          <DetectDatesButton clientId={clientId} undatedCount={undatedCount} />
+          {/* Sections live in the sidebar now. What's left here is the two
+              filters you change constantly, the one action you run often, and
+              a menu for the setup jobs you run once. */}
           <SyncButton
             clientId={clientId}
             initiallySyncing={initiallySyncing}
             syncStartedAt={initiallySyncing ? client.syncStartedAt!.toISOString() : null}
             isFirstSync={client.lastSyncedAt === null}
           />
+          <ClientActionsMenu>
+            <ImportPagesButton clientId={clientId} />
+            <DetectDatesButton clientId={clientId} undatedCount={undatedCount} />
+            <ClientAccessButton clientId={clientId} />
+          </ClientActionsMenu>
         </div>
       </header>
 

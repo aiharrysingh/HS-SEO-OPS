@@ -3,7 +3,7 @@
 SEO operations tool with a white-label client view. See
 [docs/hs-seo-ops-plan.md](docs/hs-seo-ops-plan.md) for the plan this is built against.
 
-**Phases 1–3 are built.**
+**All five phases are built.**
 
 - **Phase 1 — Content Performance Tracker.** Every blog and landing page across
   all clients, with clicks and impressions from Search Console, and performance
@@ -13,6 +13,14 @@ SEO operations tool with a white-label client view. See
 - **Phase 3 — Content calendar & keyword suggestions.** Search terms ranking at
   positions 5–20 with real impressions, split into *write this* and *improve
   this*, each plannable onto a calendar in one click.
+- **Phase 4 — Site audits.** Crawlability, AI-crawler access, JavaScript
+  rendering, on-page basics and Core Web Vitals, split into quick wins and
+  strategic work.
+- **Phase 5 — Draft review.** Pre-publish check for AI writing tells, on-page
+  SEO and whether an AI engine could cite the piece.
+
+Plus the **client portal** (§8): branded, read-only, scoped to one client at
+the data layer.
 
 **No LLM is used anywhere in this tool.** Reports are computed, not written —
 see [plan §4](docs/hs-seo-ops-plan.md) for the decision and what it trades away.
@@ -394,11 +402,49 @@ Note that `authGuard` rejects client accounts outright: every route using it
 is a team operation, and a client holds a perfectly valid session, so
 "is signed in" was never a sufficient check.
 
-## Not built yet
+## Draft review (Phase 5)
 
-Phase 5 from the plan: content review. The plan defers it deliberately — the
-team can run `draft-auditor` in Cowork today for most of the benefit at zero
-build cost.
+`/clients/[id]/review` runs the `draft-auditor` standard as rules. Paste a
+draft as Markdown and it checks three things in one pass:
+
+- **AI writing tells** — loaded vocabulary, "it's not X, it's Y", inflated
+  significance, unsourced attribution, trailing "-ing" clauses that restate
+  rather than add, em-dash overuse, uniform paragraph length, hedged
+  conclusions.
+- **On-page SEO** — title and meta length, one H1, heading hierarchy, keyword
+  in the opening and a subheading, stuffing from the other direction, anchor
+  text, image alt.
+- **AI-citation readiness** — whether sections answer their own heading early
+  enough to be extracted, and whether there are checkable figures at all.
+
+**Density and a floor, never instances.** The standard is explicit that *"one
+'crucial' is fine"*, so every pattern check needs both a rate and a minimum
+count before it fires — otherwise a single word in a short draft scores as a
+critical problem, which is exactly the manufactured finding the standard warns
+against. A clean draft returns a short, clean result.
+
+**Nothing is stored.** A review is a pre-publish check, not a record, and §5
+says resist adding tables until something needs one.
+
+Three things are listed as **not checked** rather than quietly skipped:
+substance (whether the piece says anything the ranking pages don't — the
+standard calls this the check that matters most, and it needs someone who has
+read the competition), voice (whether the patterns are AI tells or just how
+this author writes), and factual accuracy.
+
+## Navigation
+
+Client sections — Overview, Content plan, Draft review, Site audit, Analytics,
+Reports — live in the **sidebar**, nested under whichever client is open. They
+were previously buttons in the page header, which meant ten controls competing
+for attention and no way to discover a section without already being on a
+client screen.
+
+What stays in the header is what you change constantly (date range, country)
+and the one action you run often (Sync). The occasional setup jobs — import
+pages, detect dates, client access — are behind **Manage**.
+
+Active filters follow you between sections rather than resetting on each click.
 
 **Client-side auth is not built** — only the team's Google sign-in is. The
 plan calls for a separate magic-link flow for clients viewing their own

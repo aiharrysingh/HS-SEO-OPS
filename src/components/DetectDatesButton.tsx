@@ -46,6 +46,9 @@ export function DetectDatesButton({
         remaining: body.remaining,
         message:
           `Dated ${body.dated} of ${body.scanned} pages. ` +
+          (body.titled > 0
+            ? `Replaced ${body.titled} guessed title${body.titled === 1 ? "" : "s"} with the page's real one. `
+            : "") +
           (body.undated > 0
             ? `${body.undated} state no publish date — set those by hand on the page screen. `
             : "") +

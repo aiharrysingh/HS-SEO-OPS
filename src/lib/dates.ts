@@ -252,3 +252,16 @@ export function formatDateShort(iso: string): string {
     timeZone: "UTC",
   });
 }
+
+/**
+ * Month and two-digit year, for chart axes on ranges that cross a calendar
+ * year. "Jun 25" is unambiguous where a bare "3 Jun" is not, and it stays
+ * narrow enough to fit several labels across a plot.
+ */
+export function formatDateAxis(iso: string): string {
+  return parseIsoDate(iso).toLocaleDateString("en-GB", {
+    month: "short",
+    year: "2-digit",
+    timeZone: "UTC",
+  });
+}
