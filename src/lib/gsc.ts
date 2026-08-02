@@ -29,22 +29,29 @@ import { GSC_SCOPE, resolveGoogleAuth, withTimeout } from "./googleAuth";
 const RESETTLE_DAYS = 5;
 
 /**
- * How far back the very first sync for a client reaches.
+ * How far back the very first sync for a client reaches. 480 days is GSC's
+ * full 16-month retention.
  *
- * This was 480 days (GSC's full 16-month retention) to satisfy the
- * `client-report` standard's year-on-year comparison. In practice that made
- * the first sync enormous: the query pull is one row per distinct search term
- * per day, so a real site can be hundreds of thousands of rows before it ever
- * finishes — indistinguishable from a hang, and heavy enough to be genuinely
- * risky against the embedded database.
+ * This was briefly cut to 90 because a first sync looked like a hang: there
+ * was no progress logging, no request timeout, and no visible elapsed time, so
+ * a large-but-working pull was indistinguishable from a stuck one. Those were
+ * the actual defects, and they are fixed — `fetchRows` logs every page of
+ * results, requests are bounded by `GSC_REQUEST_TIMEOUT_MS`, and the sync
+ * button shows elapsed time and survives a refresh.
  *
- * 90 days makes the first sync finish quickly and is plenty for the tracker
- * and the 7/28/90-day windows the UI actually offers. The tradeoff is real
- * and deliberate: **year-on-year reporting has no data until a client has
- * been synced for a year**, or until a deeper backfill is run for it
- * separately. A first sync that never completes serves nobody.
+ * 90 days was too short for two things that matter: the `client-report`
+ * standard's year-on-year comparison, and the milestone columns, which measure
+ * a page's first 7/30/90/180 days and therefore need metrics covering the
+ * period *before* the page was imported. At 90 days almost every page was
+ * published before the data began, so the milestones stayed empty even once
+ * publish dates were known.
+ *
+ * The cost is an honest one: a first sync is now minutes rather than seconds,
+ * and query rows land in the low millions per client per year (already
+ * anticipated in `query_metrics`'s schema comment). Every later sync resumes
+ * from the newest stored date and stays quick.
  */
-const INITIAL_BACKFILL_DAYS = 90;
+const INITIAL_BACKFILL_DAYS = 480;
 
 export type SyncResult = {
   clientId: string;

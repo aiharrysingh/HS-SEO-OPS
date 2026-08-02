@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { getCurrentUser } from "@/lib/auth";
+import { requireTeamUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,10 +10,8 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ clientId: string }> },
 ) {
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-  }
+  const { user, blocked } = await requireTeamUser();
+  if (blocked) return blocked;
 
   const { clientId } = await params;
 

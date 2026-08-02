@@ -11,12 +11,12 @@ import { COOKIE_NAME } from "@/lib/session";
  */
 const PUBLIC_PREFIXES = [
   "/login",
+  // Where a client lands with an expired or missing link.
+  "/portal/login",
+  // Includes the magic-link redemption endpoint, which must be reachable
+  // precisely because the visitor has no session yet.
   "/api/auth",
   "/api/cron",
-  // The client-facing branded export. No client-auth system exists yet
-  // (plan defers it to magic-link) — unauthenticated on purpose, unchanged
-  // from before this login system existed.
-  "/reports",
 ];
 
 export default function proxy(req: NextRequest) {
@@ -31,8 +31,12 @@ export default function proxy(req: NextRequest) {
   }
 
   const dest = req.nextUrl.clone();
-  dest.pathname = "/login";
-  dest.search = `?next=${encodeURIComponent(pathname)}`;
+  // Send clients to their own sign-in rather than the team's Google one, which
+  // they cannot use and which would look like the wrong door.
+  dest.pathname = pathname.startsWith("/portal") ? "/portal/login" : "/login";
+  dest.search = pathname.startsWith("/portal")
+    ? ""
+    : `?next=${encodeURIComponent(pathname)}`;
   return NextResponse.redirect(dest);
 }
 

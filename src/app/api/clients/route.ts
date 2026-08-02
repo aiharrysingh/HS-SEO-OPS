@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
 import { getDb, schema } from "@/db";
-import { getCurrentUser } from "@/lib/auth";
+import { requireTeamUser } from "@/lib/auth";
 import { deriveBrandTerms } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 /** Create a client, typically from a Search Console property picked on /account. */
 export async function POST(req: Request) {
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-  }
+  const { user, blocked } = await requireTeamUser();
+  if (blocked) return blocked;
 
   let body: { name?: string; domain?: string; gscProperty?: string };
   try {

@@ -27,6 +27,7 @@ import { PagesTable } from "@/components/PagesTable";
 import { SyncButton } from "@/components/SyncButton";
 import { ImportPagesButton } from "@/components/ImportPagesButton";
 import { DetectDatesButton } from "@/components/DetectDatesButton";
+import { ClientAccessButton } from "@/components/ClientAccessButton";
 import {
   Card,
   CardHeader,
@@ -155,6 +156,12 @@ export default async function ClientPage({
             Content
           </Link>
           <Link
+            href={withFilters(`/clients/${clientId}/audits`, window)}
+            className="rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-page"
+          >
+            Audit
+          </Link>
+          <Link
             href={withFilters(`/clients/${clientId}/analytics`, window, {
               country: sp.country,
             })}
@@ -170,6 +177,7 @@ export default async function ClientPage({
           >
             Reports
           </Link>
+          <ClientAccessButton clientId={clientId} />
           <ImportPagesButton clientId={clientId} />
           <DetectDatesButton clientId={clientId} undatedCount={undatedCount} />
           <SyncButton

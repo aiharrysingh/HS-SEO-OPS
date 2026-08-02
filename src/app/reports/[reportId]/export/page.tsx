@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getReport } from "@/lib/reports";
+import { canReadReport } from "@/lib/clientPortal";
 import { renderMarkdown } from "@/lib/markdown";
 import { formatDate } from "@/lib/dates";
 import { GSC_LAG_DAYS } from "@/lib/dates";
@@ -27,6 +28,12 @@ export async function generateMetadata({
  * controls. Printing this page is the PDF path — a server-side renderer would
  * mean shipping a headless browser, which is a lot of infrastructure for
  * something the browser already does well.
+ *
+ * **Outside the shell is not outside authentication.** This page used to be
+ * readable by anyone holding the URL, which meant a forwarded link exposed one
+ * client's figures indefinitely. Team members may open any report including
+ * drafts (this is how a draft gets checked before approval); a client account
+ * may open only its own, and only once published.
  */
 export default async function ExportPage({
   params,
@@ -34,6 +41,19 @@ export default async function ExportPage({
   params: Promise<{ reportId: string }>;
 }) {
   const { reportId } = await params;
+
+  const access = await canReadReport(reportId);
+  if (!access.allowed) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-page px-4">
+        <div className="w-full max-w-sm rounded-xl border border-hairline bg-surface p-6 text-center">
+          <p className="text-sm font-medium text-ink">Not available</p>
+          <p className="mt-1 text-sm text-ink-secondary">{access.reason}</p>
+        </div>
+      </div>
+    );
+  }
+
   const row = await getReport(reportId);
   if (!row) notFound();
 

@@ -18,6 +18,10 @@ export default async function AppLayout({
   // check, run server-side against the database.
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  // A client account holds a valid session, so "signed in" is not enough to be
+  // in the team app. Without this a client could read every other client's
+  // data — the exact failure plan §8 calls "genuinely serious".
+  if (user.role === "client") redirect("/portal");
 
   const db = await getDb();
   const clients = await db

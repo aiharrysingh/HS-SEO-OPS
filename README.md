@@ -325,11 +325,80 @@ with zero rows.
 Competitor gaps (the third input the plan names) need Ahrefs or Semrush and
 are not built; the screen works on GSC alone and doesn't pretend otherwise.
 
+## Site audits (Phase 4)
+
+`/clients/[id]/audits` runs the `seo-audit-runner` standard as rules rather
+than prompts — same decision as reports (§4). It fetches robots.txt, the
+sitemap and a sample of 25 pages spread across the site, then checks:
+
+- **AI-crawler access.** Each agent is checked by name, because blocking one
+  does not block the others: `ClaudeBot` ≠ `Claude-SearchBot` ≠ `Claude-User`,
+  and blocking `OAI-SearchBot` removes the site from ChatGPT search answers
+  entirely. These are usually blocked by a plugin default, not a decision.
+- **JavaScript rendering.** Whether content exists in the *raw* HTML. Around
+  69% of AI crawlers can't execute JavaScript, so a client-rendered site is
+  invisible to them however good the content is. When this fires it is
+  reported as the most valuable finding.
+- Crawlability, canonicals, accidental `noindex`, titles, descriptions, H1s,
+  structured data, alt text, mixed content.
+- Core Web Vitals via PageSpeed Insights, **stating whether the numbers are
+  field (CrUX) or lab data**, because the two diverge and lab-only findings
+  mislead.
+
+Findings are **template-level, not per-URL** — "50% of sampled pages have no
+canonical" is actionable, a 340-row spreadsheet is not — and split into quick
+wins and strategic work with an effort estimate on each.
+
+Checks that can't run are listed as **not checked** rather than passed. Core
+Web Vitals needs `PAGESPEED_API_KEY`; without one the request falls back to a
+shared anonymous quota that is usually already exhausted, and the audit says
+exactly that instead of guessing.
+
+Audits are stored per client so they are comparable over time.
+
+## Client portal (§8)
+
+`/portal` is the client-facing view: branded with their logo and colour,
+read-only, and deliberately thin — their search performance and their
+published reports, nothing else.
+
+**Access.** A team member creates a link from **Client access** on the client
+screen. That creates a read-only `client`-role account and returns a
+magic link valid for 14 days. **No email is sent** — there is no mail provider
+configured, so the link is handed over to send however you already talk to the
+client. Saying so beats a "sent!" toast for mail that never leaves.
+
+**Scoping is structural, not conventional.** Plan §8 calls `client_id`
+filtering *"the one place where getting it wrong is genuinely serious"*, so the
+portal's data functions in `src/lib/clientPortal.ts` **take no client id
+argument at all** — they resolve it from the signed session. A portal route
+cannot accidentally trust a URL parameter because there is no parameter to
+trust.
+
+Enforced and verified:
+
+| | |
+|---|---|
+| Client → team app or another client's screens | redirected to their portal |
+| Client → any mutating API | `403` |
+| Client → own **unpublished** report | refused |
+| Client → **another client's** report | refused, without revealing it exists |
+| Team → drafts | allowed (that's how a draft gets reviewed) |
+
+**The report export is no longer public.** `/reports/[id]/export` was readable
+by anyone holding the URL, so a forwarded link exposed a client's figures
+indefinitely. It now requires a session, and a client account may open only
+its own reports and only once published.
+
+Note that `authGuard` rejects client accounts outright: every route using it
+is a team operation, and a client holds a perfectly valid session, so
+"is signed in" was never a sufficient check.
+
 ## Not built yet
 
-Phases 4–5 from the plan: landing page audits and content review. `audits` and
-`client_state` are already in the schema, so neither needs a migration to
-start.
+Phase 5 from the plan: content review. The plan defers it deliberately — the
+team can run `draft-auditor` in Cowork today for most of the benefit at zero
+build cost.
 
 **Client-side auth is not built** — only the team's Google sign-in is. The
 plan calls for a separate magic-link flow for clients viewing their own
