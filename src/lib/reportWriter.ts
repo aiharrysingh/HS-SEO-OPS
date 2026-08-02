@@ -1,7 +1,7 @@
 import type { Finding } from "./findings";
 import { pct } from "./findings";
 import type { ReportInput } from "./reportData";
-import { formatDate } from "./dates";
+import { daysBetween, formatDate } from "./dates";
 
 /**
  * Assembles the report markdown from computed figures and fired findings.
@@ -30,9 +30,13 @@ export function writeReport(opts: {
   const out: string[] = [];
 
   out.push(`# ${input.client.name} — SEO Performance`);
+  // Derived from the actual window rather than assumed from the cadence: a
+  // report generated over any other period would otherwise print a comparison
+  // length it did not use.
+  const periodDays = daysBetween(input.period.start, input.period.end) + 1;
   out.push(
     `**Period:** ${formatDate(input.period.start)} – ${formatDate(input.period.end)} | ` +
-      `**vs:** preceding ${input.cadence === "weekly" ? "7 days" : "28 days"}` +
+      `**vs:** preceding ${periodDays} days` +
       (yoy ? " and the same period last year" : ""),
   );
   out.push("");
@@ -191,8 +195,12 @@ export function writeReport(opts: {
     out.push(`- Comparison unavailable: ${w}.`);
   }
   out.push(
-    "- Search Console data only. No analytics, conversion or revenue data is " +
-      "included in this report.",
+    input.client.analyticsLinked
+      ? "- Search Console data only. Analytics is connected for this client but " +
+          "its figures are not yet folded into this report, so nothing here " +
+          "reflects sessions, conversions or revenue."
+      : "- Search Console data only. No analytics, conversion or revenue data is " +
+          "included in this report.",
   );
   out.push(
     "- AI Overview impressions are not exposed through the Search Console API, " +

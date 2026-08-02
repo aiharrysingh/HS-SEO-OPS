@@ -54,7 +54,17 @@ export const clients = pgTable("clients", {
     (): AnyPgColumn => users.id,
     { onDelete: "set null" },
   ),
+  /** e.g. "properties/123456789", as GA4's Admin API returns it. */
   ga4PropertyId: text("ga4_property_id"),
+  /**
+   * The GA4 counterpart of `gscAuthUserId`. Kept separate rather than reusing
+   * it because Search Console and Analytics access routinely sit with
+   * different people — sharing one column would break whenever they do.
+   */
+  ga4AuthUserId: uuid("ga4_auth_user_id").references(
+    (): AnyPgColumn => users.id,
+    { onDelete: "set null" },
+  ),
   branding: jsonb("branding").$type<Branding>().notNull().default({}),
   /**
    * Terms that mark a search query as branded — the client's name, common

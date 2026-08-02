@@ -14,93 +14,92 @@
  * in both directions.
  */
 :root {
-  --page: #f9f9f7;
-  --surface: #fcfcfb;
-  --surface-raised: #ffffff;
+  --page: #fafafa;
+  --surface: rgba(255, 255, 255, 0.7);
+  --surface-raised: rgba(255, 255, 255, 0.95);
 
-  --ink: #0b0b0b;
-  --ink-secondary: #52514e;
-  --ink-muted: #898781;
+  --ink: #0f172a;
+  --ink-secondary: #475569;
+  --ink-muted: #94a3b8;
 
-  --grid: #e1e0d9;
-  --axis: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.1);
-  --border-strong: rgba(11, 11, 11, 0.16);
+  --grid: #e2e8f0;
+  --axis: #cbd5e1;
+  --border: rgba(15, 23, 42, 0.1);
+  --border-strong: rgba(15, 23, 42, 0.16);
 
-  /* Series slots — clicks is slot 1, impressions slot 2. */
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
-  /* De-emphasis hue for sparklines, per the stat-tile contract. */
-  --series-1-quiet: #86b6ef;
+  /* Series slots — vibrant blue and purple */
+  --series-1: #3b82f6;
+  --series-2: #8b5cf6;
+  --series-1-quiet: #93c5fd;
 
-  /* Status. Reserved — never reused as a series colour. */
-  --good: #0ca30c;
-  --good-text: #006300;
-  --warning: #fab219;
-  --serious: #ec835a;
-  --critical: #d03b3b;
+  /* Status */
+  --good: #10b981;
+  --good-text: #059669;
+  --warning: #f59e0b;
+  --serious: #f97316;
+  --critical: #ef4444;
 
-  --wash-1: rgba(42, 120, 214, 0.1);
-  --wash-2: rgba(235, 104, 52, 0.1);
-  --wash-good: rgba(12, 163, 12, 0.1);
-  --wash-warning: rgba(250, 178, 25, 0.14);
-  --wash-critical: rgba(208, 59, 59, 0.1);
+  --wash-1: rgba(59, 130, 246, 0.1);
+  --wash-2: rgba(139, 92, 246, 0.1);
+  --wash-good: rgba(16, 185, 129, 0.1);
+  --wash-warning: rgba(245, 158, 11, 0.1);
+  --wash-critical: rgba(239, 68, 68, 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
-    --page: #0d0d0d;
-    --surface: #1a1a19;
-    --surface-raised: #232322;
+    --page: #09090b;
+    --surface: rgba(24, 24, 27, 0.65);
+    --surface-raised: rgba(39, 39, 42, 0.85);
 
-    --ink: #ffffff;
-    --ink-secondary: #c3c2b7;
-    --ink-muted: #898781;
+    --ink: #f8fafc;
+    --ink-secondary: #94a3b8;
+    --ink-muted: #64748b;
 
-    --grid: #2c2c2a;
-    --axis: #383835;
+    --grid: rgba(255, 255, 255, 0.08);
+    --axis: rgba(255, 255, 255, 0.15);
     --border: rgba(255, 255, 255, 0.1);
     --border-strong: rgba(255, 255, 255, 0.16);
 
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-1-quiet: #1c5cab;
+    --series-1: #0ea5e9;
+    --series-2: #a855f7;
+    --series-1-quiet: #0284c7;
 
-    --good-text: #0ca30c;
+    --good-text: #34d399;
 
-    --wash-1: rgba(57, 135, 229, 0.14);
-    --wash-2: rgba(217, 89, 38, 0.14);
-    --wash-good: rgba(12, 163, 12, 0.14);
-    --wash-warning: rgba(250, 178, 25, 0.16);
-    --wash-critical: rgba(208, 59, 59, 0.16);
+    --wash-1: rgba(14, 165, 233, 0.15);
+    --wash-2: rgba(168, 85, 247, 0.15);
+    --wash-good: rgba(52, 211, 153, 0.15);
+    --wash-warning: rgba(251, 191, 36, 0.15);
+    --wash-critical: rgba(248, 113, 113, 0.15);
   }
 }
 
 :root[data-theme="dark"] {
-  --page: #0d0d0d;
-  --surface: #1a1a19;
-  --surface-raised: #232322;
+  --page: #09090b;
+  --surface: rgba(24, 24, 27, 0.65);
+  --surface-raised: rgba(39, 39, 42, 0.85);
 
-  --ink: #ffffff;
-  --ink-secondary: #c3c2b7;
-  --ink-muted: #898781;
+  --ink: #f8fafc;
+  --ink-secondary: #94a3b8;
+  --ink-muted: #64748b;
 
-  --grid: #2c2c2a;
-  --axis: #383835;
+  --grid: rgba(255, 255, 255, 0.08);
+  --axis: rgba(255, 255, 255, 0.15);
   --border: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.16);
 
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-1-quiet: #1c5cab;
+  --series-1: #0ea5e9;
+  --series-2: #a855f7;
+  --series-1-quiet: #0284c7;
 
-  --good-text: #0ca30c;
+  --good-text: #34d399;
 
-  --wash-1: rgba(57, 135, 229, 0.14);
-  --wash-2: rgba(217, 89, 38, 0.14);
-  --wash-good: rgba(12, 163, 12, 0.14);
-  --wash-warning: rgba(250, 178, 25, 0.16);
-  --wash-critical: rgba(208, 59, 59, 0.16);
+  --wash-1: rgba(14, 165, 233, 0.15);
+  --wash-2: rgba(168, 85, 247, 0.15);
+  --wash-good: rgba(52, 211, 153, 0.15);
+  --wash-warning: rgba(251, 191, 36, 0.15);
+  --wash-critical: rgba(248, 113, 113, 0.15);
 }
 
 @theme inline {
@@ -144,9 +143,23 @@ html {
 
 body {
   background: var(--page);
+  background-image: radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.05) 0px, transparent 50%),
+                    radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.05) 0px, transparent 50%);
   color: var(--ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  body:where(:not([data-theme="light"])) {
+    background-image: radial-gradient(at 0% 0%, rgba(14, 165, 233, 0.15) 0px, transparent 50%),
+                      radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.15) 0px, transparent 50%);
+  }
+}
+
+body[data-theme="dark"] {
+  background-image: radial-gradient(at 0% 0%, rgba(14, 165, 233, 0.15) 0px, transparent 50%),
+                    radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.15) 0px, transparent 50%);
 }
 
 /* Columns of numbers must align; standalone display figures must not. */

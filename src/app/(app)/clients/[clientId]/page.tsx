@@ -143,6 +143,14 @@ export default async function ClientPage({
             label={countriesLabel(countries)}
           />
           <Link
+            href={withFilters(`/clients/${clientId}/analytics`, window, {
+              country: sp.country,
+            })}
+            className="rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-page"
+          >
+            Analytics
+          </Link>
+          <Link
             href={withFilters(`/clients/${clientId}/reports`, window, {
               country: sp.country,
             })}

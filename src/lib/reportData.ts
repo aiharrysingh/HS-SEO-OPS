@@ -82,7 +82,12 @@ export type AiOverviewCandidate = QueryMovement & {
 };
 
 export type ReportInput = {
-  client: { name: string; domain: string };
+  client: {
+    name: string;
+    domain: string;
+    /** Whether GA4 is linked, so the report's caveats can tell the truth. */
+    analyticsLinked: boolean;
+  };
   cadence: "weekly" | "monthly";
   period: DateWindow & { label: string };
   comparison: { previous: DateWindow; yearAgo: DateWindow | null };
@@ -236,7 +241,11 @@ export async function buildReportInput(opts: {
   });
 
   return {
-    client: { name: client.name, domain: client.domain },
+    client: {
+      name: client.name,
+      domain: client.domain,
+      analyticsLinked: Boolean(client.ga4PropertyId),
+    },
     cadence,
     period: { ...window, label: formatWindow(window) },
     comparison: { previous: prev, yearAgo: hasYoy ? yoy : null },

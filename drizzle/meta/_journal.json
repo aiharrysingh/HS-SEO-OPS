@@ -43,6 +43,13 @@
       "when": 1785654098072,
       "tag": "0005_youthful_vermin",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785662323819,
+      "tag": "0006_daffy_redwing",
+      "breakpoints": true
     }
   ]
 }

@@ -77,10 +77,10 @@ export default async function PortfolioPage({
               Organic clicks, all clients
             </div>
             <div className="mt-2 flex flex-wrap items-end gap-x-4 gap-y-2">
-              <div className="text-5xl font-semibold leading-none tracking-tight text-ink">
+              <div className="text-5xl font-semibold leading-none tracking-tight text-ink animate-in fade-in zoom-in duration-500">
                 {full(totals.clicks)}
               </div>
-              <div className="flex items-center gap-1.5 pb-1">
+              <div className="flex items-center gap-1.5 pb-1 animate-in fade-in slide-in-from-left-2 duration-500 delay-150">
                 <DeltaBadge d={delta(totals.clicks, totals.previousClicks)} />
                 <span className="text-xs text-ink-muted">
                   vs previous {rangeDays} days ({full(totals.previousClicks)})
@@ -116,7 +116,7 @@ export default async function PortfolioPage({
                   {summaries.map((s) => (
                     <tr
                       key={s.id}
-                      className="border-b border-hairline last:border-0 hover:bg-page"
+                      className="border-b border-hairline last:border-0 transition-colors duration-200 hover:bg-surface-raised"
                     >
                       <td className="py-2.5 pl-4 pr-3">
                         <Link

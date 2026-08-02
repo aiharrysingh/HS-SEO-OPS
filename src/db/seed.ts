@@ -74,7 +74,10 @@ const CLIENTS = [
     name: "Northwind Hotels",
     domain: "northwindhotels.co.uk",
     gscProperty: "sc-domain:northwindhotels.co.uk",
-    ga4PropertyId: "properties/411002211",
+    // Left null on purpose: a fake property id would make the Analytics screen
+    // look configured and then fail against Google rather than showing its
+    // "link a property" empty state.
+    ga4PropertyId: null as string | null,
     branding: { primaryColor: "#0f766e" },
     seed: 11,
     // Hospitality skews heavily branded — people search the hotel by name.
@@ -112,7 +115,7 @@ const CLIENTS = [
     name: "Bramble & Fern",
     domain: "brambleandfern.com",
     gscProperty: "sc-domain:brambleandfern.com",
-    ga4PropertyId: "properties/398771204",
+    ga4PropertyId: null as string | null,
     branding: { primaryColor: "#4d7c0f" },
     seed: 27,
     brandShare: 0.16,
@@ -140,7 +143,7 @@ const CLIENTS = [
     name: "Kestrel Legal",
     domain: "kestrellegal.co.uk",
     gscProperty: "sc-domain:kestrellegal.co.uk",
-    ga4PropertyId: "properties/402118876",
+    ga4PropertyId: null as string | null,
     branding: { primaryColor: "#1d4ed8" },
     seed: 43,
     brandShare: 0.11,

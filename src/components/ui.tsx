@@ -17,7 +17,7 @@ export function Card({
 }) {
   return (
     <div
-      className={`rounded-xl border border-hairline bg-surface ${className}`}
+      className={`rounded-xl border border-hairline bg-surface backdrop-blur-xl shadow-sm transition-all duration-300 hover:shadow-md hover:border-hairline-strong animate-in fade-in slide-in-from-bottom-2 ${className}`}
     >
       {children}
     </div>
@@ -129,7 +129,7 @@ export function StatTile({
       : null;
 
   return (
-    <div className="rounded-xl border border-hairline bg-surface px-4 py-3">
+    <div className="group rounded-xl border border-hairline bg-surface backdrop-blur-xl px-4 py-3 shadow-sm transition-all duration-300 hover:shadow-md hover:border-hairline-strong hover:-translate-y-0.5 animate-in fade-in slide-in-from-bottom-2">
       <div className="text-xs font-medium text-ink-secondary">{label}</div>
       <div className="mt-1.5 flex items-end justify-between gap-3">
         {/* Proportional figures: tabular-nums makes display numbers look loose. */}
@@ -160,15 +160,15 @@ export function Badge({
   tone?: "neutral" | "blue" | "good" | "warning" | "critical";
 }) {
   const tones = {
-    neutral: "bg-page text-ink-secondary border-hairline",
-    blue: "bg-wash-1 text-ink-secondary border-hairline",
-    good: "bg-wash-good text-good-text border-hairline",
-    warning: "bg-wash-warning text-ink-secondary border-hairline",
-    critical: "bg-wash-critical text-critical border-hairline",
+    neutral: "bg-page text-ink-secondary border-hairline shadow-sm",
+    blue: "bg-wash-1 text-series-1 border-hairline shadow-sm",
+    good: "bg-wash-good text-good-text border-hairline shadow-sm",
+    warning: "bg-wash-warning text-warning border-hairline shadow-sm",
+    critical: "bg-wash-critical text-critical border-hairline shadow-sm",
   } as const;
   return (
     <span
-      className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${tones[tone]}`}
+      className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium transition-colors ${tones[tone]}`}
     >
       {children}
     </span>

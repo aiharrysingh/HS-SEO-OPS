@@ -30,7 +30,8 @@ traffic.
 
 | Route | What it does |
 |---|---|
-| `/` | Portfolio: every client, 28-day clicks with change, trend, sync state |
+| `/` | Portfolio: every client, clicks with change, trend, sync state |
+| `/clients/[id]/analytics` | GA4: users, sessions, bounce rate, engagement, channel and source/landing-page breakdowns |
 | `/clients/[id]` | The tracker. Stat tiles, daily clicks and impressions, and the page table in two views — current window, or measured from each page's go-live |
 | `/clients/[id]/pages/[id]` | One page: milestones, full history since publish, and a table of every daily value |
 | `/clients/[id]/reports` | Report list, generate buttons, and the draft→approved time |
@@ -39,6 +40,41 @@ traffic.
 
 The page table sorts on any column, filters by type, and searches title, path
 and target keyword.
+
+## Filters
+
+Every dashboard takes `?from=YYYY-MM-DD&to=YYYY-MM-DD` (or `?days=N` for a
+trailing window) and `?country=ind,usa`. Both survive navigation between
+screens. Anything malformed falls back to the default 28 days rather than
+erroring, and `to` is clamped to the Search Console cutoff — you cannot ask
+for days Google hasn't settled.
+
+**Country filtering only moves site-level totals, and the UI says so.**
+Search Console reports country breakdowns for the property, not per page, so
+`country_metrics` is site-level only. Two consequences, both surfaced rather
+than hidden: with a country selected the headline tiles switch basis from
+"tracked pages" to "site-wide" and are labelled accordingly, and the page
+table carries an explicit notice that it is not country-filtered. Storing
+country per page would multiply row counts by the number of countries a site
+ranks in, for a question the dashboard asks at site level anyway.
+
+## Analytics (GA4)
+
+Link a GA4 property to a client on `/account`, then open **Analytics** from
+the client screen. Unlike Search Console data, GA4 is **queried live** rather
+than synced: the screen slices by channel, source, landing page and country in
+any combination, and GA4 filters those natively — pre-syncing every
+combination would be a combinatorial explosion. Responses are cached in memory
+for five minutes so reloads and filter tweaks don't each cost quota.
+
+The trade: the screen needs connectivity, is subject to GA4's per-property
+quota, and a report's stored snapshot captures GA4 figures only as at
+generation time.
+
+**Adding Analytics changed the OAuth scopes**, so anyone who signed in before
+it existed must sign out and back in — refresh tokens carry the scopes they
+were issued with, and Google returns 403 otherwise. `/account` says as much if
+the call fails.
 
 ## Database
 
